@@ -2,7 +2,7 @@
 name = "oorvashee-backend"
 version = "0.1.0"
 description = "Oorvashee Saree House — FastAPI e-commerce backend"
-readme = "ai-context/CURRENT_STATUS.md"
+readme = "README.md"
 requires-python = ">=3.12"
 authors = [
     { name = "Oorvashee Saree House" },
