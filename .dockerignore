@@ -25,3 +25,4 @@ docker-compose.yml
 .env.*
 !.env.example
 .postgres-data/
+!README.md
