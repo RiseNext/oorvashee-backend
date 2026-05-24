@@ -43,7 +43,7 @@ async def readiness(
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(
         status="ok" if db_ok else "degraded",
-        db="ok" if db_ok else "unreachable",
+        db="connected" if db_ok else "disconnected",
         version=settings.app_version,
         commit=None,  # populated by CI in a future revision
         env=settings.app_env.value,

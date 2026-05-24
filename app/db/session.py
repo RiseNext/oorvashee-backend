@@ -43,12 +43,14 @@ def build_engine(settings: Settings) -> AsyncEngine:
 
 
 def build_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    # NB: no `autocommit` kwarg — removed in SQLAlchemy 2.x. Passing it
+    # propagates to AsyncSession.__init__ and raises TypeError on session
+    # creation, which was the cause of the "DB unreachable" false negative.
     return async_sessionmaker(
         bind=engine,
         class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,
-        autocommit=False,
     )
 
 

@@ -28,9 +28,9 @@ venv/
 env/
 .python-version-local
 
-# --- uv ---
-uv.lock                # commit this in real projects; ignored here so each dev resolves fresh until launch
+# --- uv ---                # commit this in real projects; ignored here so each dev resolves fresh until launch
 .uv_cache/
+
 
 # --- Testing & coverage ---
 .pytest_cache/
