@@ -1,0 +1,64 @@
+# =============================================================================
+# Oorvashee Backend — gitignore (scoped to BACKEND/)
+# =============================================================================
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+.installed.cfg
+MANIFEST
+pip-wheel-metadata/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+.python-version-local
+
+# --- uv ---
+uv.lock                # commit this in real projects; ignored here so each dev resolves fresh until launch
+.uv_cache/
+
+# --- Testing & coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Docker / runtime ---
+*.pid
+*.log
+logs/
+
+# --- Alembic ---
+# Keep migrations; only ignore generated artefacts
+alembic/versions/__pycache__/
+
+# --- Local Postgres data (docker-compose) ---
+.postgres-data/
