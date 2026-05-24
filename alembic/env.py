@@ -17,8 +17,8 @@ from alembic import context
 # Make `app/` importable when Alembic runs from the project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.config import get_settings  # noqa: E402
-from app.models import Base  # noqa: E402
+from app.core.config import get_settings
+from app.models import Base
 
 # Alembic Config object — picks up alembic.ini's [alembic] section.
 config = context.config
@@ -27,8 +27,11 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Inject the URL from settings so we don't keep two sources of truth.
+# `effective_alembic_url` prefers ALEMBIC_DATABASE_URL (psycopg, with
+# `sslmode=require` for Neon) and falls back to DATABASE_URL with the
+# driver swapped — only safe for local Postgres without SSL.
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url_sync)
+config.set_main_option("sqlalchemy.url", settings.effective_alembic_url)
 
 # Target metadata for autogenerate.
 target_metadata = Base.metadata

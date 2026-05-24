@@ -1,6 +1,7 @@
 # BACKEND_ARCHITECTURE.md
 
-> **Status:** PLANNED — nothing in this document is implemented yet. This is the target architecture for the FastAPI backend, derived strictly from PRD v1.0.
+> **Status:** IMPLEMENTED (layers in place; Cycle 1+ features filling in).
+> Foundation, schema, and catalog reads are live. Cart / checkout / admin / webhooks land in subsequent cycles.
 > **Authoritative current state:** [CURRENT_STATUS.md](CURRENT_STATUS.md).
 
 ---
@@ -24,6 +25,9 @@
 | Logging | `structlog` JSON output |
 | Background tasks (launch) | FastAPI `BackgroundTasks` (in-process) |
 | Background tasks (post-launch) | Arq or Celery + Redis — see §10 |
+| Dependency manager | **uv** (`pyproject.toml` + `uv.lock`) |
+| Lint / format | **ruff** (strict ruleset incl. bandit `S`) |
+| Type check | **mypy strict** |
 
 ---
 
@@ -301,6 +305,28 @@ If multiple background jobs accumulate (post-launch), introduce **Arq** (lightwe
 - **Type hints:** required on every public function/method (mypy strict in CI).
 - **Pydantic schemas:** suffix with role — `ProductCreate`, `ProductUpdate`, `ProductRead`. Response models declared explicitly on routes.
 - **Tests:** mirror the `app/` tree under `tests/`. Unit tests mock repositories; integration tests use a transactional test DB.
+
+---
+
+## 12a. DB-side Computation Policy
+
+We keep most logic in Python services and use Postgres-side machinery sparingly. The list of DB-side automation we DO use:
+
+| Mechanism | Where | Why DB-side wins |
+|---|---|---|
+| `gen_random_uuid()` server default | every UUID PK | Avoids round-tripping UUID generation; never collides |
+| `now()` server defaults on `created_at`/`updated_at` + `onupdate` | every `TimestampMixin` user | Single clock; immune to clock-drift across replicas |
+| CHECK constraints (`stock >= 0`, percent ≤ 100, totals ≥ 0, …) | inventory, coupons, orders, etc. | Last line of defence against buggy services |
+| Native ENUM types | 14 enums | DB rejects invalid values regardless of writer |
+| Partial UNIQUE indexes (`is_default = true`, `is_primary = true`) | addresses, variants, images | Enforces "at most one" without two-step app logic |
+| **Trigger: `products_search_vector_trg`** | products | TSVECTOR cannot be a GENERATED column (immutability rules — see [DATABASE_SCHEMA.md §5](DATABASE_SCHEMA.md)); trigger keeps FTS column self-healing and impossible to skip via raw SQL writes |
+
+What we **don't** push DB-side, even though it's tempting:
+- Order-total recomputation. Keeps service-layer pricing decisions auditable + testable.
+- Stock decrement on order INSERT. Same reason — and decrement must be ordered with payment finalisation, which only the service knows about.
+- Soft-delete cascades. Repositories filter `deleted_at IS NULL`; we don't hide rows from DB readers.
+
+The rule of thumb: DB-side wins when (a) bypassing it from any other tool would corrupt invariants, and (b) the logic is short, pure, and stable. The TSVECTOR trigger meets both.
 
 ---
 

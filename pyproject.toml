@@ -83,13 +83,18 @@ select = [
     "RUF",
 ]
 ignore = [
-    "S101",  # assert used (pytest)
-    "B008",  # function call in default arg (FastAPI Depends pattern)
+    "S101",   # assert used (pytest)
+    "B008",   # function call in default arg (FastAPI Depends pattern)
+    "UP046",  # PEP 695 type parameter syntax — Pydantic generics still ship the old form
+    "RUF002", # ambiguous unicode punctuation in docstrings — we use em/en dashes deliberately
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S", "B"]
-"alembic/env.py" = ["E402"]
+"alembic/**/*.py" = ["E402", "E501"]
+"app/core/config.py" = ["S105"]   # `replace_me` placeholder strings are not real secrets
+"app/seeds/data.py" = ["E501", "RUF001"]  # hand-aligned tables + intentional en-dashes in display copy
+"app/seeds/base.py" = ["UP047"]   # PEP 695 generic-function syntax; SQLAlchemy ModelT not yet ready
 
 # --- mypy ---
 [tool.mypy]

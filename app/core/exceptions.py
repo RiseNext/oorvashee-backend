@@ -27,7 +27,13 @@ class AppError(Exception):
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
     code: str = "internal_error"
 
-    def __init__(self, message: str, *, code: str | None = None, extra: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         if code:
@@ -46,7 +52,7 @@ class ConflictError(AppError):
 
 
 class ValidationError(AppError):
-    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    status_code = 422  # HTTP_422 — Starlette renamed the constant in 0.40+
     code = "validation_error"
 
 
@@ -132,7 +138,7 @@ async def _validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     return _error_response(
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        422,
         detail="Request validation failed",
         code="validation_error",
         request_id=_request_id(request),

@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Annotated
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class AppEnv(StrEnum):
@@ -27,7 +27,10 @@ class LogLevel(StrEnum):
     ERROR = "ERROR"
 
 
-CsvStr = Annotated[list[str], Field(default_factory=list)]
+# `NoDecode` opts out of pydantic-settings' default JSON parsing for complex
+# types. Our env values are plain comma-separated strings, parsed by the
+# `_parse_csv` field_validator at `mode="before"`.
+CsvStr = Annotated[list[str], NoDecode, Field(default_factory=list)]
 
 
 def _split_csv(value: str | list[str] | None) -> list[str]:
@@ -64,7 +67,13 @@ class Settings(BaseSettings):
     workers: int = 1
 
     # --- Database ---
+    # Runtime FastAPI uses asyncpg. See `.env.example` for the format.
     database_url: PostgresDsn
+    # Alembic uses psycopg (sync). MUST be set whenever the driver-specific
+    # query string differs (e.g. Neon uses `sslmode=require` for psycopg and
+    # `ssl=require` for asyncpg). If left blank, a best-effort fallback
+    # rewrites `database_url` — works for local Docker Postgres without SSL.
+    alembic_database_url: PostgresDsn | None = None
     database_echo: bool = False
     database_pool_size: int = 5
     database_pool_max_overflow: int = 10
@@ -121,6 +130,22 @@ class Settings(BaseSettings):
             return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value
 
+    @field_validator("alembic_database_url", mode="before")
+    @classmethod
+    def _normalize_alembic_url(cls, value: str | None) -> str | None:
+        """Coerce bare `postgresql://` to the psycopg driver.
+
+        Empty string → None (lets the property fall back to `database_url`).
+        Does NOT rewrite an asyncpg-style URL: those carry `?ssl=…` which
+        psycopg rejects, so failing loudly here is better than silently
+        producing a broken connection at first migrate.
+        """
+        if value is None or value == "":
+            return None
+        if isinstance(value, str) and value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
+
     # ---------- derived helpers ----------
 
     @property
@@ -138,8 +163,27 @@ class Settings(BaseSettings):
 
     @property
     def database_url_sync(self) -> str:
-        """Alembic uses a sync driver for migration ops."""
+        """Fallback sync URL derived from `database_url`.
+
+        ONLY safe when the runtime URL has no driver-specific query params
+        (e.g. local Docker Postgres without SSL). For Neon / any managed
+        Postgres requiring SSL, set `alembic_database_url` explicitly —
+        asyncpg's `?ssl=require` is not accepted by psycopg.
+        """
         return self.database_url_str.replace("+asyncpg", "+psycopg")
+
+    @property
+    def effective_alembic_url(self) -> str:
+        """The URL Alembic actually uses for migrations.
+
+        Resolution order:
+          1. `ALEMBIC_DATABASE_URL` env var (preferred — set on Railway/Neon).
+          2. Fallback: `DATABASE_URL` with the driver swapped to psycopg.
+             Only correct when the URL carries no driver-specific params.
+        """
+        if self.alembic_database_url is not None:
+            return str(self.alembic_database_url)
+        return self.database_url_sync
 
 
 @lru_cache(maxsize=1)

@@ -1,6 +1,20 @@
 # API_CONTRACTS.md
 
-> **Status:** PLANNED — no endpoints exist yet. This document defines the target API surface derived strictly from PRD v1.0. Once implemented, this doc must be regenerated/kept in sync with the FastAPI routers under `app/routers/`.
+> **Status:** MIXED — health + catalog reads are implemented; the rest is the target shape.
+> Live source of truth for shipped endpoints: the FastAPI OpenAPI doc at `/openapi.json` (or `/docs` in non-prod).
+> Implemented endpoints are marked ✅ in the per-section tables below.
+
+## 0. Implemented (live)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/v1/health/live` | none | Process liveness (no DB hit) |
+| GET | `/api/v1/health` | none | Readiness + DB ping; returns `{ "status": "ok", "db": "connected" }` |
+| GET | `/api/v1/products` | none | List with `q, category, min_price, max_price, sort, page, page_size` |
+| GET | `/api/v1/products/{slug}` | none | Detail; returns 200 with `available=false` for archived slugs (bot URL contract) |
+| GET | `/api/v1/categories` | none | Active categories grouped by `kind` |
+
+Everything below is planned shape.
 
 ---
 
