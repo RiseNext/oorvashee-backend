@@ -1,6 +1,8 @@
 # AUTH_FLOW.md
 
-> **Status:** PLANNED — no auth code exists yet. This document defines the target Clerk + FastAPI integration derived strictly from PRD v1.0 (which mandates Clerk).
+> **Status:** IMPLEMENTED (Phase 2E complete).
+> JWT verification + JWKS cache + auto-provisioning + Clerk webhook (Svix-signed) + `require_role` factory are all live.
+> Source files: [app/core/security.py](../app/core/security.py), [app/integrations/clerk.py](../app/integrations/clerk.py), [app/services/user_sync_service.py](../app/services/user_sync_service.py), [app/routers/webhooks/clerk.py](../app/routers/webhooks/clerk.py).
 
 ---
 

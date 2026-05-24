@@ -13,6 +13,27 @@
 | GET | `/api/v1/products` | none | List with `q, category, min_price, max_price, sort, page, page_size` |
 | GET | `/api/v1/products/{slug}` | none | Detail; returns 200 with `available=false` for archived slugs (bot URL contract) |
 | GET | `/api/v1/categories` | none | Active categories grouped by `kind` |
+| POST | `/api/v1/checkout/quote` | optional | Server-recompute totals + availability for the given lines |
+| POST | `/api/v1/checkout/orders` | optional | Place order. **Requires `Idempotency-Key`.** Returns Razorpay handoff for online; `cod_pending` for COD |
+| POST | `/api/v1/payments/verify` | optional | Frontend-initiated Razorpay verify + capture. **Requires `Idempotency-Key`.** Replay-safe |
+| GET | `/api/v1/orders/{order_number}?email=` | none | Anonymous order tracking; 404 on email mismatch (no info leak) |
+| GET | `/api/v1/account/cart` | Bearer | Authenticated cart |
+| POST | `/api/v1/account/cart/items` | Bearer | Add (or increment) a variant |
+| PATCH | `/api/v1/account/cart/items/{id}` | Bearer | Set quantity |
+| DELETE | `/api/v1/account/cart/items/{id}` | Bearer | Remove a line |
+| DELETE | `/api/v1/account/cart` | Bearer | Clear cart |
+| POST | `/api/v1/account/cart/merge` | Bearer | Merge guest-localStorage cart after sign-in |
+| GET | `/api/v1/account/wishlist` | Bearer | List wishlisted products |
+| PUT | `/api/v1/account/wishlist/{product_id}` | Bearer | Add (idempotent) |
+| DELETE | `/api/v1/account/wishlist/{product_id}` | Bearer | Remove (idempotent) |
+| POST | `/api/v1/account/wishlist/{product_id}/move-to-cart` | Bearer | Add variant to cart; optionally remove from wishlist |
+| GET | `/api/v1/account/orders` | Bearer | Order history (paginated) |
+| GET | `/api/v1/account/orders/{order_number}` | Bearer | Order detail (own orders only) |
+| POST | `/api/v1/webhooks/razorpay` | signature | HMAC-verified; idempotent via `payments.webhook_event_id` UNIQUE |
+| POST | `/api/v1/webhooks/clerk` | signature | Svix-verified; handles `user.created` / `user.updated` / `user.deleted`. Other event types 200-ignored. |
+| POST | `/api/v1/admin/media/sign` | Bearer + admin | Returns signed Cloudinary upload envelope (folder, max_file_size, allowed_formats, eager all baked into signature). Context: `product` / `category` / `banner` / `reel` / `influencer` / `whatsapp_catalog`. |
+| POST | `/api/v1/admin/products/{id}/images` | Bearer + admin | Attaches Cloudinary-uploaded image after verifying response signature + folder ownership. First image auto-becomes primary. |
+| DELETE | `/api/v1/admin/products/{id}/images/{image_id}` | Bearer + admin | Removes DB row, destroys Cloudinary asset (best-effort), promotes next image to primary if needed. |
 
 Everything below is planned shape.
 

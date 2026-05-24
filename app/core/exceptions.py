@@ -78,6 +78,41 @@ class IntegrationError(AppError):
     code = "integration_error"
 
 
+class OutOfStockError(AppError):
+    """Requested quantity exceeds available stock at the moment of the check."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "out_of_stock"
+
+
+class ProductUnavailableError(AppError):
+    """Product is archived / draft / unavailable and cannot be transacted."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "product_unavailable"
+
+
+class IdempotencyConflictError(AppError):
+    """Same Idempotency-Key seen previously on a different route/user/body."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "idempotency_conflict"
+
+
+class InvalidMediaSignatureError(AppError):
+    """Cloudinary upload-response signature did not verify against the secret."""
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "invalid_media_signature"
+
+
+class MediaUploadError(AppError):
+    """Cloudinary returned an error or a malformed upload response."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "media_upload_failed"
+
+
 # ---------- Response builders ----------
 
 

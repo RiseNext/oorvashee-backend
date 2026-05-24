@@ -39,7 +39,7 @@ Extensions enabled by migrations:
 | 7 | `product_categories` | [category.py](../app/models/category.py) | Products ↔ categories junction. |
 | 8 | `products` | [product.py](../app/models/product.py) | Catalog. **Immutable slug.** Trigger-maintained TSVECTOR for FTS (see §5). |
 | 9 | `product_variants` | [product_variant.py](../app/models/product_variant.py) | SKU-level. Color/fabric/size + JSONB attributes. |
-| 10 | `product_images` | [product_image.py](../app/models/product_image.py) | Cloudinary-hosted; one primary per product. |
+| 10 | `product_images` | [product_image.py](../app/models/product_image.py) | Cloudinary-hosted; one primary per product. `format` + `bytes` added in 0004 for delivery diagnostics. |
 | 11 | `inventory` | [inventory.py](../app/models/inventory.py) | Stock + reserved per variant. CHECK constraints prevent negative / over-reserve. |
 | 12 | `stock_movements` | [inventory.py](../app/models/inventory.py) | Append-only audit of every stock change. |
 | 13 | `coupons` | [coupon.py](../app/models/coupon.py) | Discount codes (percent/flat). CHECK keeps percent ≤ 100. |
@@ -54,6 +54,7 @@ Extensions enabled by migrations:
 | 22 | `banners` | [banner.py](../app/models/banner.py) | Placement-aware promo banners. |
 | 23 | `notifications` | [notification.py](../app/models/notification.py) | Email / SMS / WhatsApp / in-app outbox. |
 | 24 | `audit_logs` | [audit_log.py](../app/models/audit_log.py) | Append-only system audit (admin actions, payments, status changes). |
+| 25 | `request_idempotency` | [request_idempotency.py](../app/models/request_idempotency.py) | Idempotency-Key cache for `/checkout/orders` + `/payments/verify`. UNIQUE on `(key, route)`; rows >24h cleaned by cron (Cycle 2G). |
 
 ---
 

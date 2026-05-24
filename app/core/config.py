@@ -93,11 +93,22 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = "replace_me"
     razorpay_webhook_secret: str = "replace_me"
 
-    # --- Cloudinary (placeholder until Cycle 1) ---
+    # --- Cloudinary ---
     cloudinary_cloud_name: str = "oorvashee"
     cloudinary_api_key: str = "replace_me"
     cloudinary_api_secret: str = "replace_me"
-    cloudinary_upload_folder: str = "local/products"
+    # Top-level folder all uploads land under. Use `local/`, `staging/`, `prod/`
+    # so environments don't trample each other in a shared Cloudinary account.
+    cloudinary_upload_folder: str = "local"
+    # Hard cap enforced by Cloudinary at the edge (PRD §5.4: admin uploads
+    # 10-30MB raw). Set high enough to accept original photos.
+    cloudinary_max_file_size_bytes: int = 30 * 1024 * 1024
+    # Default formats accepted for image contexts. Per-context overrides live
+    # in `app/services/media_service.py::CONTEXT_CONFIGS`.
+    cloudinary_allowed_image_formats: str = "jpg,jpeg,png,webp,avif"
+    # How long an upload signature remains valid. Cloudinary defaults to 1h;
+    # short is good — limits the window an intercepted signature is useful.
+    cloudinary_signature_ttl_seconds: int = 600
 
     # --- Resend (placeholder until Cycle 2) ---
     resend_api_key: str = "re_replace_me"
@@ -110,12 +121,36 @@ class Settings(BaseSettings):
 
     # --- Observability ---
     sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    sentry_profiles_sample_rate: float = 0.0
+
+    # --- Rate limiting ---
+    # `slowapi` storage URI. Empty string = process-local in-memory (fine for
+    # single-instance Railway). Switch to `redis://...` when scaling to N
+    # replicas so rate-limit state is shared across processes.
+    rate_limit_enabled: bool = True
+    rate_limit_storage_uri: str = ""
+    # Applied globally as a baseline; stricter per-route profiles live in
+    # `app/core/rate_limit.py` and are decorated onto critical routes.
+    rate_limit_default: str = "200/minute"
+
+    # --- Request hardening ---
+    # Outer body-size cap enforced by middleware. Tune up per-route if a
+    # legitimate endpoint needs larger payloads (Phase 3 CSV import).
+    max_request_body_bytes: int = 1 * 1024 * 1024
+    # Path prefixes whose body bypasses the size middleware — signature
+    # verification on webhook routes reads raw bytes that may exceed JSON
+    # caps. Cloudinary direct-uploads bypass our infra entirely.
+    body_size_exempt_path_prefixes: CsvStr = Field(
+        default_factory=lambda: ["/api/v1/webhooks"]
+    )
 
     # ---------- validators ----------
 
     @field_validator(
         "allowed_origins",
         "clerk_authorized_parties",
+        "body_size_exempt_path_prefixes",
         mode="before",
     )
     @classmethod

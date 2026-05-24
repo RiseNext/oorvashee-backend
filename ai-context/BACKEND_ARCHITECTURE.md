@@ -308,6 +308,24 @@ If multiple background jobs accumulate (post-launch), introduce **Arq** (lightwe
 
 ---
 
+## 11a. Production Hardening (Phase 2G)
+
+Cross-cutting middleware + observability stack:
+
+| Concern | Module | Notes |
+|---|---|---|
+| Rate limiting | [core/rate_limit.py](../app/core/rate_limit.py) | slowapi; global `200/min` default + per-profile decorators (`checkout` 30/min, `tracking` 30/min, `webhook` 120/min, `admin` 600/min). JWT-aware key (`composite_key`). Redis-ready via `RATE_LIMIT_STORAGE_URI`. Custom 429 handler matches our error shape. |
+| Error tracking | [core/sentry.py](../app/core/sentry.py) | Optional + lazy. Skips init on empty/garbage DSN. PII stripped. `request_id` propagated as Sentry tag from middleware. |
+| Security headers | [core/security_headers.py](../app/core/security_headers.py) | HSTS, nosniff, frame deny, referrer policy, COOP, server-banner override. Applied to 4xx/5xx too. |
+| Body size cap | [core/body_size.py](../app/core/body_size.py) | 1 MB JSON default; `/api/v1/webhooks/*` exempt (signature reads raw bytes). |
+| Request correlation | [core/middleware.py](../app/core/middleware.py) | Inbound `X-Request-ID` honoured (≤64 chars), echoed back on response, bound to structlog + Sentry tag. |
+| Latency banding | [core/middleware.py](../app/core/middleware.py) | Every access log line carries `latency_band=fast|ok|slow|very_slow`. |
+| Idempotency cleanup | [scripts/cleanup_idempotency.py](../scripts/cleanup_idempotency.py) | Railway-cron compatible; batched DELETE; safe to run hot. |
+
+Middleware order (outer → inner): `CORS → SecurityHeaders → BodySizeLimit → SlowAPI → GZip → RequestContext → routes`. Documented in [main.py](../app/main.py).
+
+---
+
 ## 12a. DB-side Computation Policy
 
 We keep most logic in Python services and use Postgres-side machinery sparingly. The list of DB-side automation we DO use:

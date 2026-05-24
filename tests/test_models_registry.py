@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "product_images",
     "product_variants",
     "products",
+    "request_idempotency",
     "reviews",
     "roles",
     "shipments",

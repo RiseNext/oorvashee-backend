@@ -29,6 +29,7 @@ from app.models.payment import Payment, Shipment
 from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.product_variant import ProductVariant
+from app.models.request_idempotency import RequestIdempotency
 from app.models.review import Review
 from app.models.role import Role, UserRole
 from app.models.user import User
@@ -54,6 +55,7 @@ __all__ = [
     "ProductCategory",
     "ProductImage",
     "ProductVariant",
+    "RequestIdempotency",
     "Review",
     "Role",
     "Shipment",

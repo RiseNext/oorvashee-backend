@@ -39,6 +39,13 @@ dependencies = [
 
     # Multipart (for future admin uploads)
     "python-multipart>=0.0.9",
+
+    # Rate limiting (in-memory at launch; Redis-ready via storage_uri)
+    "slowapi>=0.1.9",
+
+    # Error tracking + tracing (optional — no-op when SENTRY_DSN unset).
+    # Bracketed `[fastapi]` extra pulls in Starlette/FastAPI integrations.
+    "sentry-sdk[fastapi]>=2.14.0",
 ]
 
 [dependency-groups]

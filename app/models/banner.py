@@ -55,8 +55,11 @@ class Banner(
     )
 
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_public_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mobile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mobile_image_public_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     video_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_public_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     cta_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
     cta_url: Mapped[str | None] = mapped_column(Text, nullable=True)

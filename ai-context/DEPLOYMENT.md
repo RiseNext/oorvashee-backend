@@ -1,6 +1,19 @@
 # DEPLOYMENT.md
 
-> **Status:** PLANNED — nothing is deployed yet. This document defines the target deployment topology, environment management, CI/CD, and operational procedures, derived strictly from PRD §9.
+> **Status:** IMPLEMENTED (Railway + Neon live). Production hardening (rate limiting, Sentry, security headers, body cap, idempotency cleanup) shipped in Phase 2G.
+>
+> **Add to Railway env (Phase 2G):**
+> - `RATE_LIMIT_ENABLED=true`
+> - `RATE_LIMIT_STORAGE_URI=` (empty for single instance; `redis://...` when scaling to >1 replica)
+> - `RATE_LIMIT_DEFAULT=200/minute`
+> - `MAX_REQUEST_BODY_BYTES=1048576`
+> - `BODY_SIZE_EXEMPT_PATH_PREFIXES=/api/v1/webhooks`
+> - `SENTRY_DSN=` (real DSN to enable) · `SENTRY_TRACES_SAMPLE_RATE=0.1`
+>
+> **Railway Cron (recommended):**
+> - Daily at 03:00 UTC: `python -m scripts.cleanup_idempotency` — removes stale rows from `request_idempotency`.
+>
+> **Warning:** never put inline `# comments` after `=` in Railway env vars or local `.env`. pydantic-settings does not strip them and the literal becomes the value.
 
 ---
 

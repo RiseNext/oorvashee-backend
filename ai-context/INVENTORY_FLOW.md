@@ -1,6 +1,6 @@
 # INVENTORY_FLOW.md
 
-> **Status:** PLANNED — no inventory code exists yet. This document defines the target stock-management flow derived strictly from PRD §6.3 and §6.1.
+> **Status:** IMPLEMENTED — `app/services/inventory_service.py` owns all stock mutations. Single locking strategy across reservation, decrement, restock, release.
 
 ---
 

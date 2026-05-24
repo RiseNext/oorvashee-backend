@@ -34,6 +34,8 @@ class ProductImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    format: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     is_primary: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"

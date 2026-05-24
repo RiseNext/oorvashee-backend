@@ -207,3 +207,115 @@ async def require_admin(
         log.warning("admin_access_denied", clerk_user_id=principal.clerk_user_id)
         raise PermissionDeniedError("Admin role required")
     return principal
+
+
+def require_role(*allowed_roles: str):  # type: ignore[no-untyped-def]
+    """Dependency factory: caller's role must match one of `allowed_roles`.
+
+    Usage:
+        @router.post(
+            "/admin/products",
+            dependencies=[Depends(require_role("admin"))],
+        )
+        async def create_product(...): ...
+
+        @router.get(
+            "/admin/orders",
+            dependencies=[Depends(require_role("admin", "staff"))],
+        )
+        async def list_orders(...): ...
+
+    Role names match what Clerk emits in `public_metadata.role` (lowercase).
+    The check reads the JWT claim — fast, no DB hit. The local `user_roles`
+    table stays in sync via the Clerk webhook for admin-list queries +
+    audit traceability; this dependency does not consult it.
+
+    `require_admin` is preserved as a standalone function for the existing
+    Cycle-0 call sites; use this factory for everything new.
+    """
+    if not allowed_roles:
+        raise ValueError("require_role needs at least one role name")
+
+    normalized = {r.lower().strip() for r in allowed_roles}
+
+    async def _dependency(
+        principal: Annotated[Principal, Depends(get_current_principal)],
+    ) -> Principal:
+        if principal.role.lower() not in normalized:
+            log.warning(
+                "role_access_denied",
+                required=sorted(normalized),
+                got=principal.role,
+                clerk_user_id=principal.clerk_user_id,
+            )
+            raise PermissionDeniedError(
+                f"Required role(s): {', '.join(sorted(normalized))}",
+            )
+        return principal
+
+    return _dependency
+
+
+# =============================================================================
+# Local user resolution — auto-provisioning fallback
+# =============================================================================
+#
+# The Clerk webhook (`POST /webhooks/clerk`) is now the PRIMARY user
+# provisioning path — it mirrors Clerk users into the local `users` table
+# proactively whenever Clerk emits user.created / user.updated / user.deleted.
+#
+# This dependency stays as a DEFENSIVE FALLBACK against webhook lag — if a
+# JWT arrives faster than Svix delivers the user.created event, we still
+# materialise the row so the request can complete. The webhook then
+# reconciles when it lands (idempotent — see UserSyncService).
+#
+# Endpoints that need a real `User` row (cart, wishlist, account/*, orders)
+# depend on this rather than on `get_current_principal` directly.
+
+from sqlalchemy import select  # noqa: E402
+
+from app.db.deps import DbSession  # noqa: E402
+from app.models.user import User  # noqa: E402
+
+
+async def get_current_user(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: DbSession,
+) -> User:
+    """Return the local `User` row for the authenticated principal.
+
+    Creates the row on the fly if missing — covers two scenarios:
+    1. Clerk webhook hasn't landed yet (Cycle 4).
+    2. Webhook lag — JWT issued faster than Svix delivery.
+
+    `email` is sourced from the JWT claim. Clerk includes it by default in
+    the standard token template; if your Clerk session template omits it,
+    add `{"email": "{{user.primary_email_address}}"}`.
+    """
+    stmt = select(User).where(User.clerk_user_id == principal.clerk_user_id)
+    user = (await session.execute(stmt)).scalar_one_or_none()
+    if user is not None:
+        return user
+
+    # First-touch provisioning. Email is the only required claim beyond
+    # `sub`; if it's missing we fail loudly so the auth flow gets fixed,
+    # rather than store a junk placeholder.
+    if not principal.email:
+        log.error(
+            "user_autoprovision_missing_email",
+            clerk_user_id=principal.clerk_user_id,
+        )
+        raise AuthenticationError("JWT missing `email` claim — fix Clerk session template")
+
+    user = User(
+        clerk_user_id=principal.clerk_user_id,
+        email=principal.email,
+    )
+    session.add(user)
+    await session.flush()
+    log.info(
+        "user_autoprovisioned",
+        user_id=str(user.id),
+        clerk_user_id=principal.clerk_user_id,
+    )
+    return user
