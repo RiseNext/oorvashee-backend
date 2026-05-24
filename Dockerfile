@@ -25,6 +25,7 @@ WORKDIR /build
 COPY pyproject.toml ./
 # uv.lock is optional in early dev — if present, copy it for reproducible builds
 COPY uv.lock* ./
+COPY README.md ./
 
 RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null \
     || uv sync --no-dev --no-install-project
