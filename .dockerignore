@@ -16,7 +16,6 @@ coverage.xml
 .vscode/
 .DS_Store
 Thumbs.db
-*.md
 ai-context/
 tests/
 docker-compose.yml
