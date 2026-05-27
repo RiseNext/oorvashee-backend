@@ -169,6 +169,20 @@ async def _http_exception_handler(
     )
 
 
+def _safe_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
+    """Pydantic error rows minus the un-JSON-serialisable `ctx.error` field."""
+    out: list[dict[str, Any]] = []
+    for row in errors:
+        safe = {k: v for k, v in row.items() if k != "ctx"}
+        ctx = row.get("ctx")
+        if isinstance(ctx, dict):
+            safe_ctx = {k: v for k, v in ctx.items() if k != "error"}
+            if safe_ctx:
+                safe["ctx"] = safe_ctx
+        out.append(safe)
+    return out
+
+
 async def _validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
@@ -177,7 +191,11 @@ async def _validation_exception_handler(
         detail="Request validation failed",
         code="validation_error",
         request_id=_request_id(request),
-        extra={"errors": exc.errors()},
+        # Sanitise — Pydantic stuffs the raw Python exception object into
+        # `ctx.error` when a `@model_validator` raises ValueError. JSONResponse
+        # uses stdlib `json.dumps` (no jsonable_encoder), so that object trips
+        # `TypeError: not JSON serializable`. Strip non-JSON keys per row.
+        extra={"errors": _safe_validation_errors(exc.errors())},
     )
 
 

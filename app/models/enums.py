@@ -173,6 +173,30 @@ class AuditAction(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+class ImportKind(StrEnum):
+    """What an admin CSV upload is bulk-importing."""
+
+    PRODUCT = "product"
+    VARIANT = "variant"
+    INVENTORY = "inventory"
+
+
+class ImportStatus(StrEnum):
+    """Lifecycle of an `import_jobs` row.
+
+    `queued`  → row created, awaiting BackgroundTasks pickup.
+    `running` → processor is iterating chunks. Status visible to admin.
+    `completed` → finished — may have row errors but the job didn't crash.
+    `failed` → catastrophic (CSV unreadable, DB connection lost mid-run).
+                Partial commits up to the failure point ARE preserved.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 PG_ENUMS: list[tuple[type[StrEnum], str]] = [
     (UserStatus, "user_status"),
     (CategoryKind, "category_kind"),
@@ -188,4 +212,6 @@ PG_ENUMS: list[tuple[type[StrEnum], str]] = [
     (NotificationChannel, "notification_channel"),
     (NotificationStatus, "notification_status"),
     (AuditAction, "audit_action"),
+    (ImportKind, "import_kind"),
+    (ImportStatus, "import_status"),
 ]

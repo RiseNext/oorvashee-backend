@@ -113,21 +113,26 @@ COD payment is marked `paid` later via admin endpoint `POST /admin/orders/{numbe
 
 ---
 
-## 5. Product Availability Recomputation
+## 5. Product Availability Recomputation (IMPLEMENTED)
 
-After every stock change (decrement or restock):
+`InventoryService.recompute_product_availability(product_id)` — called by
+the admin adjust path (Phase 3C). Existing checkout decrement / consume /
+restock paths could also call it; left as a small follow-up since the
+catalog computes "available" live from stock and PRD §6.3's auto-flip is
+a UX optimisation, not a correctness gate.
 
 ```python
-# inventory_service.recompute_product_availability(product_id)
+# app/services/inventory_service.py
 
 total_stock = SUM(stock) over all active variants of product
-if total_stock == 0 and product.status == 'published':
-    product.status = 'unavailable'
-    log: "auto-marked unavailable, all variants at 0"
-elif total_stock > 0 and product.status == 'unavailable':
-    product.status = 'published'
-    log: "auto-restored to published, stock returned"
+if   product.status == PUBLISHED and total_stock == 0  -> UNAVAILABLE
+elif product.status == UNAVAILABLE and total_stock > 0 -> PUBLISHED
+# DRAFT and ARCHIVED are untouched — admin-controlled lifecycle states.
 ```
+
+Writes one `audit_logs` row with `STATUS_CHANGED` action and
+`trigger=inventory_recompute` metadata so the audit trail explains WHY
+the product flipped without an admin click.
 
 `unavailable` differs from `archived`:
 - `unavailable` = no stock; URL still resolves; can be auto-restored when restocked
@@ -146,19 +151,41 @@ PRD §6.3 — SHOULD HAVE.
 
 ---
 
-## 7. Manual Adjustments
+## 7. Manual Adjustments (Phase 3C — IMPLEMENTED)
 
-Admin endpoint: `POST /admin/inventory/variants/{id}/adjust`.
+Admin endpoint: `POST /api/v1/admin/inventory/{variant_id}/adjust`.
 
-Body:
+Body (one of three modes):
 ```json
-{ "delta": -1, "reason": "manual_adjustment", "note": "Damaged in showroom display" }
+{ "mode": "increment", "value": 5, "reason": "restock", "note": "5 from supplier" }
+{ "mode": "decrement", "value": 3, "reason": "manual_adjustment", "note": "damaged" }
+{ "mode": "set",       "value": 0, "reason": "manual_adjustment", "note": "out for now" }
 ```
 
-Writes:
-- UPDATE `product_variant.stock` (with CHECK >= 0 enforcement)
-- INSERT `stock_movement` with `actor_user_id = current admin`
-- Recompute product availability
+Validation (refused before any mutation):
+- `reason` ∈ `{manual_adjustment, restock}` only — system reasons rejected at schema layer.
+- For INCREMENT / DECREMENT, `value > 0`. SET allows 0.
+- Resulting stock must be `>= 0` AND `>= reserved` (preserves the
+  reservation invariant — would otherwise leave paid orders unfulfillable).
+
+Execution flow:
+1. `lock_inventory_rows([variant_id])` — same `SELECT … FOR UPDATE` lock that
+   protects checkout. Admin adjust and a racing reservation cannot interleave.
+2. Compute target stock + delta.
+3. UPDATE `inventory.stock` to target.
+4. INSERT `stock_movements` with the delta + reason + admin actor + note.
+5. INSERT `audit_logs` with action `STOCK_ADJUSTED` and full before/after metadata.
+6. `recompute_product_availability(product_id)` — auto-flip parent product
+   PUBLISHED ↔ UNAVAILABLE based on total stock across active variants
+   (see §5 below).
+
+Response surface includes `product_status_after` (set only when the flip
+actually fired) so the admin UI can update the parent product card in
+one round-trip.
+
+**Threshold update** is a separate endpoint
+(`PATCH /api/v1/admin/inventory/{variant_id}/threshold`) — metadata only,
+no row lock taken because it doesn't gate stock decisions.
 
 ---
 

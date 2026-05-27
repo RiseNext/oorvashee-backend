@@ -21,13 +21,20 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import (
+    insert as pg_insert,  # noqa: F401  (reserved for future on-conflict ops)
+)
 
 from app.core.exceptions import OutOfStockError
 from app.core.logging import get_logger
-from app.models.enums import StockMovementReason
+from app.models.audit_log import AuditLog
+from app.models.enums import AuditAction, ProductStatus, StockMovementReason
 from app.models.inventory import Inventory, StockMovement
+from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.services.base import BaseService
 
 log = get_logger(__name__)
@@ -46,13 +53,20 @@ class InventoryService(BaseService):
     # Internal — lock + validate
     # ------------------------------------------------------------------
 
-    async def _lock_inventory_rows(
+    async def lock_inventory_rows(
         self, variant_ids: list[uuid.UUID]
     ) -> dict[uuid.UUID, Inventory]:
         """Acquire row-level locks on the given variants' inventory rows.
 
         Deterministic ordering (sorted ids) avoids deadlocks when two
-        concurrent checkouts touch the same variants in different orders.
+        concurrent transactions touch the same variants in different orders.
+        Used by:
+          - checkout reserve / decrement / restock (this service)
+          - AdminInventoryService.adjust (manual stock changes)
+
+        Future warehouse expansion: when `inventory` gains a `warehouse_id`
+        column, this method gains a `warehouse_id` parameter and the ORDER
+        BY adds it as a secondary key. Callers stay the same.
         """
         if not variant_ids:
             return {}
@@ -65,6 +79,9 @@ class InventoryService(BaseService):
         )
         rows = (await self.session.execute(stmt)).scalars().all()
         return {row.variant_id: row for row in rows}
+
+    # Backwards-compatible alias for existing internal callers in this file.
+    _lock_inventory_rows = lock_inventory_rows
 
     @staticmethod
     def _ensure_available(inv: Inventory, requested: int, variant_id: uuid.UUID) -> None:
@@ -272,3 +289,90 @@ class InventoryService(BaseService):
             lines=len(requirements),
             reason=reason.value,
         )
+
+    # ------------------------------------------------------------------
+    # Product availability recomputation
+    # ------------------------------------------------------------------
+
+    async def recompute_product_availability(
+        self,
+        product_id: uuid.UUID,
+        *,
+        actor_user_id: uuid.UUID | None = None,
+        request_id: str | None = None,
+    ) -> ProductStatus | None:
+        """Auto-flip PUBLISHED ↔ UNAVAILABLE based on total active stock.
+
+        Rules (per PRD §6.3):
+          - total stock = SUM(inventory.stock) across active variants.
+          - status=PUBLISHED + total=0  → UNAVAILABLE  (auto-hide from new orders)
+          - status=UNAVAILABLE + total>0 → PUBLISHED   (auto-restore)
+          - DRAFT / ARCHIVED untouched — admin-controlled lifecycle states.
+
+        Returns the new status if it changed, else None. Writes one
+        `audit_logs` row tagged `STATUS_CHANGED` so the timeline shows
+        WHY the product flipped without an admin click.
+
+        Idempotent: re-running on a row that's already in the right state
+        is a no-op.
+        """
+        product = await self.session.get(Product, product_id)
+        if product is None:
+            return None
+        if product.status not in (ProductStatus.PUBLISHED, ProductStatus.UNAVAILABLE):
+            return None  # DRAFT / ARCHIVED owned by admin lifecycle endpoints
+
+        total_stock = await self._sum_active_stock(product_id)
+        before = product.status
+        target: ProductStatus | None = None
+
+        if before is ProductStatus.PUBLISHED and total_stock == 0:
+            target = ProductStatus.UNAVAILABLE
+        elif before is ProductStatus.UNAVAILABLE and total_stock > 0:
+            target = ProductStatus.PUBLISHED
+
+        if target is None:
+            return None
+
+        product.status = target
+        product.updated_at = datetime.now(UTC)
+        self.session.add(
+            AuditLog(
+                action=AuditAction.STATUS_CHANGED,
+                entity_type="product",
+                entity_id=str(product.id),
+                actor_user_id=actor_user_id,
+                summary=(
+                    f"Product '{product.name}' auto-{target.value} "
+                    f"(total_stock={total_stock})"
+                ),
+                metadata_={
+                    "from": before.value,
+                    "to": target.value,
+                    "trigger": "inventory_recompute",
+                    "total_stock": total_stock,
+                },
+                request_id=request_id,
+            )
+        )
+        await self.session.flush()
+        log.info(
+            "product_availability_auto_flipped",
+            product_id=str(product_id),
+            from_status=before.value,
+            to_status=target.value,
+            total_stock=total_stock,
+        )
+        return target
+
+    async def _sum_active_stock(self, product_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.coalesce(func.sum(Inventory.stock), 0))
+            .select_from(Inventory)
+            .join(ProductVariant, ProductVariant.id == Inventory.variant_id)
+            .where(
+                ProductVariant.product_id == product_id,
+                ProductVariant.is_active.is_(True),
+            )
+        )
+        return int((await self.session.execute(stmt)).scalar_one())

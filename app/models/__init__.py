@@ -22,6 +22,7 @@ from app.models.banner import Banner
 from app.models.cart import Cart, CartItem
 from app.models.category import Category, ProductCategory
 from app.models.coupon import Coupon
+from app.models.import_job import ImportJob
 from app.models.inventory import Inventory, StockMovement
 from app.models.notification import Notification
 from app.models.order import Order, OrderItem
@@ -46,6 +47,7 @@ __all__ = [
     "CartItem",
     "Category",
     "Coupon",
+    "ImportJob",
     "Inventory",
     "Notification",
     "Order",

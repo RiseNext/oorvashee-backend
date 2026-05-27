@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "carts",
     "categories",
     "coupons",
+    "import_jobs",
     "inventory",
     "notifications",
     "order_items",

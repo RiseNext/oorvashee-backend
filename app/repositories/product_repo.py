@@ -128,3 +128,90 @@ class ProductRepository(BaseRepository[Product]):
             )
         )
         return int((await self.session.execute(stmt)).scalar_one())
+
+    # ---------- Admin reads -------------------------------------------------
+
+    async def slug_exists(self, slug: str) -> bool:
+        """UNIQUE check used by the service before INSERT for a clean 409."""
+        stmt = select(func.count()).select_from(Product).where(Product.slug == slug)
+        return int((await self.session.execute(stmt)).scalar_one()) > 0
+
+    async def get_admin(self, product_id: uuid.UUID) -> Product | None:
+        """Full eager-loaded fetch for admin views.
+
+        Includes variants + inventory + images + category links so the
+        admin detail endpoint hits the DB exactly once.
+        """
+        stmt = (
+            select(Product)
+            .where(Product.id == product_id)
+            .options(
+                selectinload(Product.images),
+                selectinload(Product.variants).selectinload(ProductVariant.inventory),
+                selectinload(Product.category_links),
+            )
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    def admin_list_query(
+        self,
+        *,
+        q: str | None = None,
+        statuses: list[ProductStatus] | None = None,
+        category_slug: str | None = None,
+        featured_only: bool = False,
+    ) -> Select:
+        """Build the admin list base query.
+
+        Distinct from `base_catalog_query` — admin sees DRAFT + ARCHIVED
+        too. Sorting + pagination are applied by the service.
+        """
+        stmt = select(Product)
+
+        if statuses:
+            stmt = stmt.where(Product.status.in_(statuses))
+
+        if q:
+            # FTS covers most cases; ILIKE on slug catches admins searching
+            # by URL-fragment which the FTS index doesn't tokenise on.
+            stmt = stmt.where(
+                Product.search_vector.op("@@")(func.plainto_tsquery("english", q))
+                | Product.slug.ilike(f"%{q.lower()}%")
+            )
+
+        if category_slug:
+            stmt = (
+                stmt.join(ProductCategory, ProductCategory.product_id == Product.id)
+                .join(Category, Category.id == ProductCategory.category_id)
+                .where(Category.slug == category_slug)
+                .distinct()
+            )
+
+        if featured_only:
+            stmt = stmt.where(Product.featured.is_(True))
+
+        return stmt.order_by(Product.updated_at.desc(), Product.id.desc())
+
+    async def admin_aggregate_stock(
+        self, product_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[int, int]]:
+        """Total stock + variant count keyed by product id — one round-trip.
+
+        Returns: `{product_id: (total_stock, variant_count)}`. Used by the
+        admin list endpoint to avoid an N+1 across the page.
+        """
+        if not product_ids:
+            return {}
+        stmt = (
+            select(
+                ProductVariant.product_id,
+                func.coalesce(func.sum(Inventory.stock), 0),
+                func.count(ProductVariant.id.distinct()),
+            )
+            .select_from(ProductVariant)
+            .outerjoin(Inventory, Inventory.variant_id == ProductVariant.id)
+            .where(ProductVariant.product_id.in_(product_ids))
+            .group_by(ProductVariant.product_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {row[0]: (int(row[1]), int(row[2])) for row in rows}

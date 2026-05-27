@@ -29,6 +29,60 @@
 | POST | `/api/v1/account/wishlist/{product_id}/move-to-cart` | Bearer | Add variant to cart; optionally remove from wishlist |
 | GET | `/api/v1/account/orders` | Bearer | Order history (paginated) |
 | GET | `/api/v1/account/orders/{order_number}` | Bearer | Order detail (own orders only) |
+| GET    | `/api/v1/admin/products` | admin | Filters: q, status[], category_slug, featured_only. Paginated. |
+| POST   | `/api/v1/admin/products` | admin | Create — slug auto-derived from name. Status defaults DRAFT. |
+| GET    | `/api/v1/admin/products/{id}` | admin | Full admin view with variants + inventory + images + category links. |
+| PATCH  | `/api/v1/admin/products/{id}` | admin | Partial update. `slug` + `status` silently ignored if sent. |
+| POST   | `/api/v1/admin/products/{id}/publish` | admin | DRAFT/UNAVAILABLE → PUBLISHED. Requires ≥1 active variant. |
+| POST   | `/api/v1/admin/products/{id}/unpublish` | admin | PUBLISHED → DRAFT. Preserves `published_at`. |
+| POST   | `/api/v1/admin/products/{id}/archive` | admin | Any → ARCHIVED. Slug stays reserved per PRD §7.2. |
+| POST   | `/api/v1/admin/products/{id}/unarchive` | admin | ARCHIVED → DRAFT. Forces deliberate two-step before re-publish. |
+| PUT    | `/api/v1/admin/products/{id}/categories` | admin | Replace category set (idempotent). |
+| POST   | `/api/v1/admin/products/{id}/variants` | admin | Add variant + seed inventory row. |
+| PATCH  | `/api/v1/admin/products/{id}/variants/{vid}` | admin | Partial variant update. |
+| DELETE | `/api/v1/admin/products/{id}/variants/{vid}` | admin | Soft-deactivate (`is_active=false`). |
+| GET    | `/api/v1/admin/categories` | admin | Filters: q, kind[], is_active, parent_id. Paginated. Each row carries total + published product counts (one round-trip aggregation). |
+| POST   | `/api/v1/admin/categories` | admin | Create. Slug auto-derived; `kind` required + immutable thereafter. |
+| GET    | `/api/v1/admin/categories/{id}` | admin | Full admin view. |
+| PATCH  | `/api/v1/admin/categories/{id}` | admin | Partial update. `slug` + `kind` + `is_active` silently ignored if sent. Parent change enforces self-cycle / descendant-cycle / depth-cap (MAX_DEPTH=3) checks. Image swaps trigger best-effort Cloudinary destroy of the old `public_id`. |
+| POST   | `/api/v1/admin/categories/{id}/archive` | admin | `is_active=false`. Hides from catalog filter UI. |
+| POST   | `/api/v1/admin/categories/{id}/unarchive` | admin | `is_active=true`. |
+| PUT    | `/api/v1/admin/categories/{id}/order` | admin | Set `display_order` (single-row reorder). |
+| GET    | `/api/v1/admin/inventory` | admin | Filters: q, low_stock_only, out_of_stock_only. Paginated. JOIN-eager (no N+1). Items carry stock + reserved + available + threshold + is_low + is_out + price. |
+| GET    | `/api/v1/admin/inventory/health` | admin | One-glance summary: active variants, total + reserved + available units, out/low/healthy counts. Single round-trip aggregate. |
+| GET    | `/api/v1/admin/inventory/movements` | admin | Global stock-movement audit timeline. Filters: variant_id, reason[], actor_user_id, order_id, since, until. Newest first. |
+| GET    | `/api/v1/admin/inventory/{variant_id}` | admin | Variant detail + last 20 movements. |
+| GET    | `/api/v1/admin/inventory/{variant_id}/movements` | admin | Per-variant audit timeline. |
+| POST   | `/api/v1/admin/inventory/{variant_id}/adjust` | admin | Manual stock adjustment. Modes: increment / decrement / set. Reason whitelist: `manual_adjustment`, `restock`. Row-locked. Refuses below 0 or below reserved. Auto-flips parent product PUBLISHED ↔ UNAVAILABLE. Writes `stock_movements` + `audit_logs`. |
+| PATCH  | `/api/v1/admin/inventory/{variant_id}/threshold` | admin | Update `low_stock_threshold` (metadata only — no row lock). |
+| GET    | `/api/v1/admin/orders` | admin | Filters: q, status[], payment_status[], payment_method, since, until, has_shipment, sort. Paginated. Per-row aggregates (item_count, has_shipment) computed in one extra round-trip. |
+| GET    | `/api/v1/admin/orders/summary` | admin | Dashboard tile — status bucket counts + payment-state breakdown + total_revenue_paid. Single aggregate query. |
+| GET    | `/api/v1/admin/orders/{id}` | admin | Full order + items + payments + shipment + timeline (synthesised from timestamps + payments + audit_logs). |
+| POST   | `/api/v1/admin/orders/{id}/packed` | admin | placed → packed. Razorpay orders require `payment_status=paid`; COD requires `cod_pending` or `paid`. Idempotent. |
+| POST   | `/api/v1/admin/orders/{id}/shipped` | admin | packed → shipped. Body requires `courier_name` + `tracking_id`. Creates/updates Shipment row + stamps `shipped_at`. Idempotent. |
+| POST   | `/api/v1/admin/orders/{id}/delivered` | admin | shipped → delivered. COD orders auto-flip `payment_status` → `paid`. Stamps `shipment.delivered_at`. Idempotent. |
+| POST   | `/api/v1/admin/orders/{id}/cancel` | admin | Non-delivered status → cancelled. Body requires `reason` (min 3 chars). Restocks all line items + recomputes parent product availability. Writes `requires_refund=true` audit metadata when payment_status was PAID. Refuses on delivered orders (returns flow is Phase 4). Idempotent. |
+| POST   | `/api/v1/admin/orders/{id}/cod-paid` | admin | COD-only: payment_status cod_pending → paid. For when admin records cash receipt before marking delivered. Idempotent. |
+| PUT    | `/api/v1/admin/orders/{id}/shipment` | admin | Update courier/tracking/url on an existing shipment. Doesn't change `shipped_at`. |
+| POST   | `/api/v1/admin/orders/{id}/notes` | admin | Add an admin note. Stored on audit_logs with `metadata.type=admin_note`. Separate from `order.notes` (customer-facing). |
+| GET    | `/api/v1/admin/analytics/overview` | admin | Top-line KPIs (revenue, orders, AOV, units, new customers). Defaults to last 30 days; 366-day cap. `Cache-Control: max-age=60`. |
+| GET    | `/api/v1/admin/analytics/trend` | admin | Time series (revenue + orders + units) bucketed by `day` / `week` / `month`. Dense buckets — zeros filled for quiet days. |
+| GET    | `/api/v1/admin/analytics/top-products` | admin | Top-N (default 10, max 100) by `revenue` or `units` over range. |
+| GET    | `/api/v1/admin/analytics/top-categories` | admin | Top-N categories over range. Multi-tag products contribute to every category they belong to. |
+| GET    | `/api/v1/admin/analytics/fulfillment` | admin | "Right now" operational tiles — awaiting_packing, awaiting_shipment, in_transit, delivered_today (UTC), cod_outstanding, shipped_missing_tracking. No time-range param. |
+| GET    | `/api/v1/admin/analytics/customers` | admin | new / repeat / returning / guest_orders / total_active_customers for the window. |
+| GET    | `/api/v1/admin/customers` | admin | Paginated customer list with order aggregates baked in (orders_count, paid_orders_count, lifetime_value, last_order_at). Filters: q (email/phone/full_name), has_orders, include_deleted. Sort: newest / oldest / ltv_desc / orders_desc / last_order_desc. |
+| GET    | `/api/v1/admin/customers/summary` | admin | Segment counts: total / new_30d / with_orders / with_paid_orders / repeat (≥2 paid) / dormant (no paid order in 90 days) / deleted. Single aggregate query. |
+| GET    | `/api/v1/admin/customers/{user_id}` | admin | Full detail: profile + addresses + roles + KPI tile (LTV, AOV, days_since_last_order, is_repeat, account_age) + recent 5 orders. |
+| GET    | `/api/v1/admin/customers/{user_id}/orders` | admin | Paginated full order history for one customer. |
+| GET    | `/api/v1/admin/customers/{user_id}/activity` | admin | Timeline merged from 4 sources: sign-up + orders + role assignments + admin notes. Newest first. |
+| POST   | `/api/v1/admin/customers/{user_id}/notes` | admin | Add an admin note. Stored on audit_logs with `metadata.type=admin_note`. Refuses on deleted customers. |
+| GET    | `/api/v1/admin/imports` | admin | Paginated list of import jobs. Filters: kind, status. |
+| GET    | `/api/v1/admin/imports/{job_id}` | admin | Job detail — status, progress, row-level errors (capped at 1000 entries), summary. |
+| POST   | `/api/v1/admin/imports/products` | admin | Multipart CSV upload. Returns 202 with job_id; processing happens via BackgroundTasks. `?dry_run=true` validates without persisting. 50 MB hard cap. |
+| POST   | `/api/v1/admin/imports/variants` | admin | Same shape. CSV references parent products by `product_slug`. Creates variant + initial inventory row atomically. |
+| POST   | `/api/v1/admin/imports/inventory` | admin | Same shape. Adjusts stock via the same row-lock + recompute path as 3C. Use `mode=set` for retry-safe re-imports. |
+| GET    | `/api/v1/admin/imports/templates/{kind}` | admin | Download starter CSV template (kind ∈ `product`, `variant`, `inventory`). |
 | POST | `/api/v1/webhooks/razorpay` | signature | HMAC-verified; idempotent via `payments.webhook_event_id` UNIQUE |
 | POST | `/api/v1/webhooks/clerk` | signature | Svix-verified; handles `user.created` / `user.updated` / `user.deleted`. Other event types 200-ignored. |
 | POST | `/api/v1/admin/media/sign` | Bearer + admin | Returns signed Cloudinary upload envelope (folder, max_file_size, allowed_formats, eager all baked into signature). Context: `product` / `category` / `banner` / `reel` / `influencer` / `whatsapp_catalog`. |

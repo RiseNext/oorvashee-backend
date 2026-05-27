@@ -142,7 +142,12 @@ class Settings(BaseSettings):
     # verification on webhook routes reads raw bytes that may exceed JSON
     # caps. Cloudinary direct-uploads bypass our infra entirely.
     body_size_exempt_path_prefixes: CsvStr = Field(
-        default_factory=lambda: ["/api/v1/webhooks"]
+        default_factory=lambda: [
+            "/api/v1/webhooks",
+            # CSV bulk imports legitimately exceed the JSON cap.
+            # `AdminImportService` enforces its own 50 MB ceiling.
+            "/api/v1/admin/imports",
+        ]
     )
 
     # ---------- validators ----------

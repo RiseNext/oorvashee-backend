@@ -12,7 +12,14 @@ from app.routers import health
 from app.routers.account import cart as account_cart
 from app.routers.account import orders as account_orders
 from app.routers.account import wishlist as account_wishlist
+from app.routers.admin import analytics as admin_analytics
+from app.routers.admin import categories as admin_categories
+from app.routers.admin import customers as admin_customers
+from app.routers.admin import imports as admin_imports
+from app.routers.admin import inventory as admin_inventory
 from app.routers.admin import media as admin_media
+from app.routers.admin import orders as admin_orders
+from app.routers.admin import products as admin_products
 from app.routers.public import categories as public_categories
 from app.routers.public import checkout as public_checkout
 from app.routers.public import orders as public_orders
@@ -72,9 +79,26 @@ api_v1_router.include_router(
     admin_media.router, prefix="/admin", tags=["admin:media"]
 )
 
-# ---- Admin: product / order CRUD (Phase 3 — next cycle) ---------------------
-# api_v1_router.include_router(
-#     admin_products.router, prefix="/admin/products", tags=["admin:products"]
-# )
+api_v1_router.include_router(
+    admin_products.router, prefix="/admin/products", tags=["admin:products"]
+)
+api_v1_router.include_router(
+    admin_categories.router, prefix="/admin/categories", tags=["admin:categories"]
+)
+api_v1_router.include_router(
+    admin_inventory.router, prefix="/admin/inventory", tags=["admin:inventory"]
+)
+api_v1_router.include_router(
+    admin_orders.router, prefix="/admin/orders", tags=["admin:orders"]
+)
+api_v1_router.include_router(
+    admin_analytics.router, prefix="/admin/analytics", tags=["admin:analytics"]
+)
+api_v1_router.include_router(
+    admin_customers.router, prefix="/admin/customers", tags=["admin:customers"]
+)
+api_v1_router.include_router(
+    admin_imports.router, prefix="/admin/imports", tags=["admin:imports"]
+)
 
 __all__ = ["api_v1_router"]

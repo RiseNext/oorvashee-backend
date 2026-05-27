@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 
 from app.core.exceptions import NotFoundError
 from app.core.rate_limit import profiles
@@ -29,6 +29,7 @@ router = APIRouter()
 @profiles.tracking()
 async def get_order_by_number(
     request: Request,
+    response: Response,
     order_number: str,
     session: DbSession,
     email: Annotated[str, Query(min_length=3, max_length=320)],

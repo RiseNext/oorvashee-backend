@@ -47,7 +47,12 @@ class CategoryRead(CategoryBase):
 
 
 class CategorySummary(BaseModel):
-    """Lightweight shape used in product responses + filter widgets."""
+    """Lightweight shape used in product responses + filter widgets.
+
+    Carries `description` so the storefront category page can render its
+    subtitle/intro from a single source of truth (the category row) without
+    any hardcoded frontend copy.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,6 +60,7 @@ class CategorySummary(BaseModel):
     slug: str
     name: str
     kind: CategoryKind
+    description: str | None = None
 
 
 class CategoryGroup(BaseModel):

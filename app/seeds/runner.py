@@ -28,6 +28,8 @@ from app.seeds.data import (
     BANNERS,
     CATEGORIES,
     DEFAULT_PRODUCT_STATUS,
+    LEGACY_CATEGORY_SLUGS,
+    LEGACY_PRODUCT_SLUGS,
     PRODUCTS,
 )
 
@@ -39,20 +41,22 @@ from app.seeds.data import (
 async def _seed_categories(session: AsyncSession) -> SeedReport:
     report = SeedReport()
     for data in CATEGORIES:
+        # Mutable display/SEO fields refreshed on every run; `kind` is set on
+        # create only (changing a category's kind is an admin/migration concern).
+        fields = {
+            "name": data["name"],
+            "display_order": data["display_order"],
+            "description": data.get("description"),
+            "seo_title": data.get("seo_title"),
+            "seo_description": data.get("seo_description"),
+            "image_url": data.get("image_url"),
+        }
         _, created, updated = await get_or_create(
             session,
             Category,
             lookup={"slug": data["slug"]},
-            defaults={
-                "name": data["name"],
-                "kind": data["kind"],
-                "display_order": data["display_order"],
-                "is_active": True,
-            },
-            update_fields={
-                "name": data["name"],
-                "display_order": data["display_order"],
-            },
+            defaults={**fields, "kind": data["kind"], "is_active": True},
+            update_fields=fields,
         )
         if created:
             report.created["categories"] += 1
@@ -60,7 +64,35 @@ async def _seed_categories(session: AsyncSession) -> SeedReport:
             report.updated["categories"] += 1
         else:
             report.skipped["categories"] += 1
+
+    # Second pass: resolve `parent_slug` → `parent_id` now that every category
+    # row exists. Self-referential hierarchy ("Pattu" → weave children).
+    await _link_category_parents(session, report)
     return report
+
+
+async def _link_category_parents(
+    session: AsyncSession, report: SeedReport
+) -> None:
+    slugs = [c["slug"] for c in CATEGORIES]
+    rows = (
+        await session.execute(select(Category).where(Category.slug.in_(slugs)))
+    ).scalars().all()
+    by_slug = {c.slug: c for c in rows}
+    for data in CATEGORIES:
+        parent_slug = data.get("parent_slug")
+        if not parent_slug:
+            continue
+        child = by_slug.get(data["slug"])
+        parent = by_slug.get(parent_slug)
+        if child is None or parent is None:
+            continue
+        if child.parent_id != parent.id:
+            child.parent_id = parent.id
+            report.updated["category_parents"] += 1
+        else:
+            report.skipped["category_parents"] += 1
+    await session.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -299,12 +331,15 @@ async def reset_seeds(session: AsyncSession) -> SeedReport:
         report.updated["banners"] += result.rowcount or 0
 
     # --- Products (cascade handles variants/inventory/images/category links)
-    slugs = [p["slug"] for p in PRODUCTS]
+    # Include LEGACY_PRODUCT_SLUGS so the pre-alignment demo catalog is removed
+    # from Neon on reseed, leaving no orphans.
+    slugs = [p["slug"] for p in PRODUCTS] + LEGACY_PRODUCT_SLUGS
     result = await session.execute(delete(Product).where(Product.slug.in_(slugs)))
     report.updated["products"] += result.rowcount or 0
 
     # --- Categories -------------------------------------------------------
-    cat_slugs = [c["slug"] for c in CATEGORIES]
+    # Include LEGACY_CATEGORY_SLUGS so the old fabric taxonomy is deleted too.
+    cat_slugs = [c["slug"] for c in CATEGORIES] + LEGACY_CATEGORY_SLUGS
     result = await session.execute(delete(Category).where(Category.slug.in_(cat_slugs)))
     report.updated["categories"] += result.rowcount or 0
 

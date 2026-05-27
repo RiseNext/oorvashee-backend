@@ -2,7 +2,14 @@
 
 The shape is intentionally plain dicts so non-engineers can edit it.
 The loaders in `runner.py` resolve cross-references (e.g. product → category
-slug → category id) at apply time.
+slug → category id, and category `parent_slug` → parent id) at apply time.
+
+CANONICAL TAXONOMY: the category tree below mirrors the client-approved
+frontend merchandising structure exactly (see ai-context/TAXONOMY.md). Slugs
+match the storefront nav slugs, so the frontend resolves categories directly —
+there is no translation layer. Navigable departments are `kind=collection`
+with a `parent_slug` hierarchy ("Pattu" → weave children). Facet axes
+(occasion/region/color/price_bracket) are kept as complementary filters.
 """
 
 from __future__ import annotations
@@ -17,22 +24,55 @@ from app.models.enums import (
 )
 
 # ---------------------------------------------------------------------------
-# Categories — taxonomy axes that filter the catalog.
+# Categories — canonical merchandising tree + orthogonal facet axes.
 # ---------------------------------------------------------------------------
+# `parent_slug` (optional) nests a department under a parent department.
+# `description` is the storefront subtitle (single source of truth, exposed
+# on CategorySummary). `kind=collection` = the navigable department tree.
 
 CATEGORIES: list[dict[str, Any]] = [
-    # --- Fabric ---
-    {"slug": "kanchipuram-silk", "name": "Kanchipuram Silk",  "kind": CategoryKind.FABRIC, "display_order": 1},
-    {"slug": "banarasi-silk",    "name": "Banarasi Silk",     "kind": CategoryKind.FABRIC, "display_order": 2},
-    {"slug": "mysore-silk",      "name": "Mysore Silk",       "kind": CategoryKind.FABRIC, "display_order": 3},
-    {"slug": "tussar-silk",      "name": "Tussar Silk",       "kind": CategoryKind.FABRIC, "display_order": 4},
-    {"slug": "chanderi",         "name": "Chanderi",          "kind": CategoryKind.FABRIC, "display_order": 5},
-    {"slug": "patola",           "name": "Patola",            "kind": CategoryKind.FABRIC, "display_order": 6},
-    {"slug": "georgette",        "name": "Georgette",         "kind": CategoryKind.FABRIC, "display_order": 7},
-    {"slug": "cotton",           "name": "Cotton",            "kind": CategoryKind.FABRIC, "display_order": 8},
-    {"slug": "linen",            "name": "Linen",             "kind": CategoryKind.FABRIC, "display_order": 9},
+    # --- Departments: Pattu (parent) + weave children -----------------------
+    {"slug": "pattu", "name": "Pattu", "kind": CategoryKind.COLLECTION, "display_order": 1,
+     "description": "Pure silk weaves — heirloom drapes for the occasions that matter.",
+     "seo_title": "Pattu Silk Sarees", "seo_description": "Handwoven pure-silk pattu sarees — Gadwal, Kanchi, Narayanpet and more."},
+    {"slug": "gadwal-silk-sarees", "name": "Gadwal Silk Sarees", "kind": CategoryKind.COLLECTION, "parent_slug": "pattu", "display_order": 1,
+     "description": "Cotton body, silk pallu — the signature interlocked Gadwal weave."},
+    {"slug": "kanchi-silk", "name": "Kanchi Silk", "kind": CategoryKind.COLLECTION, "parent_slug": "pattu", "display_order": 2,
+     "description": "Lustrous Kanchipuram silk in classic temple borders."},
+    {"slug": "narayanapet-sarees", "name": "Narayanapet Sarees", "kind": CategoryKind.COLLECTION, "parent_slug": "pattu", "display_order": 3,
+     "description": "Handloom silk-cotton with a quiet, everyday elegance."},
+    {"slug": "mangalgiri-sarees", "name": "Mangalgiri Sarees", "kind": CategoryKind.COLLECTION, "parent_slug": "pattu", "display_order": 4,
+     "description": "Crisp handloom cotton with fine zari borders."},
+    {"slug": "harini-pattu", "name": "Harini Pattu", "kind": CategoryKind.COLLECTION, "parent_slug": "pattu", "display_order": 5,
+     "description": "Soft silk drapes, light enough for all-day wear."},
 
-    # --- Occasion ---
+    # --- Departments: top-level ---------------------------------------------
+    {"slug": "cotton-sarees", "name": "Cotton Sarees", "kind": CategoryKind.COLLECTION, "display_order": 2,
+     "description": "Breathable handloom cotton for daily grace."},
+    {"slug": "banaras-sarees", "name": "Banaras Sarees", "kind": CategoryKind.COLLECTION, "display_order": 3,
+     "description": "Timeless Banarasi silk in intricate zari and brocade weaves.",
+     "seo_title": "Banaras Sarees", "seo_description": "Pure Banarasi katan and tissue silk sarees with Mughal-era zari work."},
+    {"slug": "designer-sarees", "name": "Designer Sarees", "kind": CategoryKind.COLLECTION, "display_order": 4,
+     "description": "Contemporary statement pieces, thoughtfully composed."},
+    {"slug": "kalamkari-sarees", "name": "Kalamkari Sarees", "kind": CategoryKind.COLLECTION, "display_order": 5,
+     "description": "Hand-painted and block-printed narrative motifs."},
+    {"slug": "pure-kanjivaram-silk", "name": "Pure Kanjivaram Silk", "kind": CategoryKind.COLLECTION, "display_order": 6,
+     "description": "Heirloom-grade mulberry silk with tested zari.",
+     "seo_title": "Pure Kanjivaram Silk Sarees", "seo_description": "Bridal-grade pure Kanjivaram silk sarees woven on traditional looms."},
+    {"slug": "fancy-sarees", "name": "Fancy Sarees", "kind": CategoryKind.COLLECTION, "display_order": 7,
+     "description": "Light, flowing drapes for easy festive dressing."},
+    {"slug": "kanchi-pattu-saree", "name": "Kanchipattu Sarees", "kind": CategoryKind.COLLECTION, "display_order": 8,
+     "description": "The classic South Indian bridal silk."},
+    {"slug": "cocktail-party-wear-sarees", "name": "Cocktail & Party Wear", "kind": CategoryKind.COLLECTION, "display_order": 9,
+     "description": "Festive-ready sarees for evenings that sparkle."},
+
+    # --- Seasonal collections (banners, not the permanent nav) --------------
+    {"slug": "diwali-2026", "name": "Diwali 2026", "kind": CategoryKind.COLLECTION, "display_order": 20,
+     "description": "Festive sarees crafted on traditional looms across India."},
+    {"slug": "wedding-edit", "name": "Wedding Edit", "kind": CategoryKind.COLLECTION, "display_order": 21,
+     "description": "Bridal Kanjivarams, Banarasis, and heirloom silks."},
+
+    # --- Occasion (facet) ---------------------------------------------------
     {"slug": "bridal",      "name": "Bridal",      "kind": CategoryKind.OCCASION, "display_order": 1},
     {"slug": "wedding",     "name": "Wedding",     "kind": CategoryKind.OCCASION, "display_order": 2},
     {"slug": "festive",     "name": "Festive",     "kind": CategoryKind.OCCASION, "display_order": 3},
@@ -40,11 +80,11 @@ CATEGORIES: list[dict[str, Any]] = [
     {"slug": "office",      "name": "Office",      "kind": CategoryKind.OCCASION, "display_order": 5},
     {"slug": "casual",      "name": "Casual",      "kind": CategoryKind.OCCASION, "display_order": 6},
 
-    # --- Region ---
+    # --- Region (facet) -----------------------------------------------------
     {"slug": "south-indian", "name": "South Indian", "kind": CategoryKind.REGION, "display_order": 1},
     {"slug": "north-indian", "name": "North Indian", "kind": CategoryKind.REGION, "display_order": 2},
 
-    # --- Colour ---
+    # --- Colour (facet) -----------------------------------------------------
     {"slug": "maroon",       "name": "Maroon",       "kind": CategoryKind.COLOR, "display_order": 1},
     {"slug": "red",          "name": "Red",          "kind": CategoryKind.COLOR, "display_order": 2},
     {"slug": "pink",         "name": "Pink",         "kind": CategoryKind.COLOR, "display_order": 3},
@@ -56,249 +96,317 @@ CATEGORIES: list[dict[str, Any]] = [
     {"slug": "mustard",      "name": "Mustard",      "kind": CategoryKind.COLOR, "display_order": 9},
     {"slug": "multicolor",   "name": "Multicolor",   "kind": CategoryKind.COLOR, "display_order": 10},
 
-    # --- Price bracket ---
+    # --- Price bracket (facet) ---------------------------------------------
     {"slug": "under-5k",   "name": "Under ₹5,000",      "kind": CategoryKind.PRICE_BRACKET, "display_order": 1},
     {"slug": "5k-15k",     "name": "₹5,000 – ₹15,000",  "kind": CategoryKind.PRICE_BRACKET, "display_order": 2},
     {"slug": "15k-50k",    "name": "₹15,000 – ₹50,000", "kind": CategoryKind.PRICE_BRACKET, "display_order": 3},
     {"slug": "above-50k",  "name": "Above ₹50,000",     "kind": CategoryKind.PRICE_BRACKET, "display_order": 4},
+]
 
-    # --- Collections ---
-    {"slug": "diwali-2026",   "name": "Diwali 2026",  "kind": CategoryKind.COLLECTION, "display_order": 1},
-    {"slug": "wedding-edit",  "name": "Wedding Edit", "kind": CategoryKind.COLLECTION, "display_order": 2},
+
+# Legacy slugs to delete on reseed so the old (pre-alignment) taxonomy + demo
+# catalog don't linger in Neon as orphans / duplicate meaning.
+LEGACY_CATEGORY_SLUGS: list[str] = [
+    "kanchipuram-silk", "banarasi-silk", "mysore-silk", "tussar-silk",
+    "chanderi", "patola", "georgette", "cotton", "linen",
+]
+LEGACY_PRODUCT_SLUGS: list[str] = [
+    "kanchipuram-bridal-maroon", "banarasi-gold-tissue", "mysore-soft-silk-pink",
+    "tussar-cream-daily", "cotton-office-navy", "banarasi-wedding-red",
+    "chanderi-pastel-green", "georgette-floral-multicolor",
+    "patola-double-ikat-royal", "linen-half-half-mustard",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Products — 10 realistic sarees with variants + inventory + images.
+# Products — demo catalog themed to populate every approved department.
+# Each product is linked to its department (+ "pattu" parent for weave
+# children) and orthogonal facets. Pattu children carry "pattu" so the parent
+# page shows the union.
 # ---------------------------------------------------------------------------
 
 PRODUCTS: list[dict[str, Any]] = [
+    # --- Pattu › Gadwal -----------------------------------------------------
     {
-        "slug": "kanchipuram-bridal-maroon",
-        "name": "Kanchipuram Bridal Silk Saree — Maroon",
-        "short_description": "Hand-woven pure mulberry silk with classic temple-border zari work, made on traditional looms in Kanchipuram.",
+        "slug": "gadwal-pure-silk-peacock-blue",
+        "name": "Gadwal Pure Silk Saree — Peacock Blue",
+        "short_description": "Cotton-silk Gadwal with a contrast pure-silk pallu and interlocked kuttu border.",
         "description": (
-            "A heritage piece for the modern bride. This Kanchipuram silk saree is "
-            "woven by master weavers using pure mulberry silk and tested zari, with "
-            "the classic Mayil Chakkaram motif running through the body and a wide "
-            "gold-zari pallu. Comes with an unstitched blouse piece in matching maroon."
+            "A handwoven Gadwal from the looms of Jogulamba Gadwal, Telangana. The "
+            "lightweight cotton-silk body carries a rich peacock-blue pure-silk pallu "
+            "joined by the signature interlocked (kuttu) technique, finished with a "
+            "fine gold-zari temple border."
         ),
-        "base_price": Decimal("24999"),
-        "mrp": Decimal("29999"),
-        "tags": ["bridal", "kanchipuram", "silk", "south-indian", "zari", "wedding"],
-        "featured": True,
-        "is_bestseller": True,
-        "is_new": False,
-        "categories": ["kanchipuram-silk", "bridal", "south-indian", "maroon", "15k-50k", "wedding-edit"],
+        "base_price": Decimal("16999"), "mrp": Decimal("19999"),
+        "tags": ["gadwal", "silk", "handloom", "festive", "south-indian", "zari"],
+        "featured": True, "is_bestseller": False, "is_new": True,
+        "categories": ["gadwal-silk-sarees", "pattu", "festive", "south-indian", "blue", "15k-50k"],
         "variants": [
-            {"sku": "OOR-KCB-MAR-01", "color": "Maroon",     "fabric": "Kanchipuram Silk", "is_default": True,  "stock": 8},
-            {"sku": "OOR-KCB-RED-01", "color": "Deep Red",   "fabric": "Kanchipuram Silk", "is_default": False, "stock": 5},
-            {"sku": "OOR-KCB-BLU-01", "color": "Royal Blue", "fabric": "Kanchipuram Silk", "is_default": False, "stock": 3},
+            {"sku": "OOR-GDW-PBL-01", "color": "Peacock Blue", "fabric": "Gadwal Silk Cotton", "is_default": True,  "stock": 6},
+            {"sku": "OOR-GDW-GRN-01", "color": "Bottle Green", "fabric": "Gadwal Silk Cotton", "is_default": False, "stock": 4},
         ],
         "image_count": 3,
     },
+    # --- Pattu › Kanchi Silk ------------------------------------------------
     {
-        "slug": "banarasi-gold-tissue",
-        "name": "Banarasi Gold Tissue Silk Saree",
-        "short_description": "Lightweight tissue silk with intricate Mughal-era jaal work, ideal for festive evenings.",
+        "slug": "kanchi-silk-teal-gold",
+        "name": "Kanchi Silk Saree — Teal & Gold",
+        "short_description": "Lightweight Kanchipuram silk with a broad gold-zari border, easy to drape.",
         "description": (
-            "Spun-gold tissue silk woven in Varanasi with a delicate jaal of paisleys "
-            "and floral booti. The fabric catches light beautifully, making it a "
-            "stand-out for Diwali, Karva Chauth, and engagement evenings."
+            "A daytime-friendly Kanchi silk in deep teal with a broad traditional "
+            "gold-zari border and a contrast mustard pallu. Lighter than a bridal "
+            "Kanjivaram, it is made for festive lunches, pujas, and family functions."
         ),
-        "base_price": Decimal("18500"),
-        "mrp": Decimal("21000"),
-        "tags": ["banarasi", "silk", "festive", "tissue", "north-indian", "diwali"],
-        "featured": True,
-        "is_bestseller": False,
-        "is_new": False,
-        "categories": ["banarasi-silk", "festive", "north-indian", "gold", "15k-50k", "diwali-2026"],
+        "base_price": Decimal("11500"), "mrp": None,
+        "tags": ["kanchi", "kanchipuram", "silk", "festive", "south-indian"],
+        "featured": False, "is_bestseller": True, "is_new": False,
+        "categories": ["kanchi-silk", "pattu", "festive", "south-indian", "green", "5k-15k"],
         "variants": [
-            {"sku": "OOR-BGT-GLD-01", "color": "Gold",         "fabric": "Banarasi Tissue", "is_default": True, "stock": 6},
-            {"sku": "OOR-BGT-AGD-01", "color": "Antique Gold", "fabric": "Banarasi Tissue", "is_default": False, "stock": 4},
+            {"sku": "OOR-KCS-TEL-01", "color": "Teal",    "fabric": "Kanchipuram Silk", "is_default": True,  "stock": 8},
+            {"sku": "OOR-KCS-MAR-01", "color": "Maroon",  "fabric": "Kanchipuram Silk", "is_default": False, "stock": 5},
+            {"sku": "OOR-KCS-MUS-01", "color": "Mustard", "fabric": "Kanchipuram Silk", "is_default": False, "stock": 6},
         ],
         "image_count": 3,
     },
+    # --- Pattu › Narayanapet ------------------------------------------------
     {
-        "slug": "mysore-soft-silk-pink",
-        "name": "Mysore Soft Silk Saree — Rose Pink",
-        "short_description": "Crepe-weighted Mysore silk with a satin sheen and minimal zari border. Light, drapeable, festive.",
+        "slug": "narayanapet-silk-cotton-maroon",
+        "name": "Narayanpet Silk-Cotton Saree — Maroon",
+        "short_description": "Handloom Narayanpet with a temple-checked body and zari-striped pallu.",
         "description": (
-            "Pure crepe Mysore silk in rose pink, finished with a thin gold-zari "
-            "border. Falls soft and stays in place — perfect for daytime functions, "
-            "house pujas, and small celebrations. Pairs with both contrast and "
-            "tonal blouses."
+            "Woven in Narayanpet on the Telangana–Karnataka border, this silk-cotton "
+            "saree carries the characteristic small temple checks across a maroon body "
+            "with a contrast zari-striped pallu. Crisp, durable, and made for repeat wear."
         ),
-        "base_price": Decimal("8999"),
-        "mrp": None,
-        "tags": ["mysore", "silk", "festive", "south-indian", "crepe"],
-        "featured": False,
-        "is_bestseller": False,
-        "is_new": True,
-        "categories": ["mysore-silk", "festive", "south-indian", "pink", "5k-15k"],
+        "base_price": Decimal("3499"), "mrp": None,
+        "tags": ["narayanpet", "silk-cotton", "handloom", "daily", "south-indian"],
+        "featured": False, "is_bestseller": False, "is_new": False,
+        "categories": ["narayanapet-sarees", "pattu", "daily-wear", "south-indian", "maroon", "under-5k"],
         "variants": [
-            {"sku": "OOR-MSS-PNK-01", "color": "Rose Pink",     "fabric": "Mysore Silk", "is_default": True,  "stock": 10},
-            {"sku": "OOR-MSS-PCH-01", "color": "Peach",         "fabric": "Mysore Silk", "is_default": False, "stock": 8},
-            {"sku": "OOR-MSS-PIS-01", "color": "Pista Green",   "fabric": "Mysore Silk", "is_default": False, "stock": 6},
+            {"sku": "OOR-NRP-MAR-01", "color": "Maroon", "fabric": "Narayanpet Silk Cotton", "is_default": True,  "stock": 12},
+            {"sku": "OOR-NRP-IND-01", "color": "Indigo", "fabric": "Narayanpet Silk Cotton", "is_default": False, "stock": 9},
         ],
         "image_count": 2,
     },
+    # --- Pattu › Mangalgiri -------------------------------------------------
     {
-        "slug": "tussar-cream-daily",
-        "name": "Tussar Silk Cream Daily Drape",
-        "short_description": "Natural-finish tussar with hand-block prints. Comfortable for all-day wear in warm weather.",
+        "slug": "mangalgiri-cotton-mustard",
+        "name": "Mangalgiri Handloom Cotton Saree — Mustard",
+        "short_description": "Crisp Mangalgiri cotton with the signature Nizam zari border.",
         "description": (
-            "Tussar silk woven in Bhagalpur with its signature uneven grain and warm "
-            "cream base. Block-printed motifs along the pallu in earthy madder. "
-            "Breathable enough for daily wear, refined enough for office and lunches."
+            "Pure handloom cotton from Mangalgiri, Andhra Pradesh, in a warm mustard "
+            "with the town's signature fine Nizam gold-zari border. Breathable and "
+            "office-ready; it accepts a quick iron and holds its shape all day."
         ),
-        "base_price": Decimal("4499"),
-        "mrp": None,
-        "tags": ["tussar", "silk", "daily", "block-print", "north-indian"],
-        "featured": False,
-        "is_bestseller": False,
-        "is_new": False,
-        "categories": ["tussar-silk", "daily-wear", "north-indian", "cream", "under-5k"],
+        "base_price": Decimal("2299"), "mrp": None,
+        "tags": ["mangalgiri", "cotton", "handloom", "office", "south-indian"],
+        "featured": False, "is_bestseller": False, "is_new": True,
+        "categories": ["mangalgiri-sarees", "pattu", "office", "south-indian", "mustard", "under-5k"],
         "variants": [
-            {"sku": "OOR-TSC-CRM-01", "color": "Cream", "fabric": "Tussar Silk", "is_default": True,  "stock": 12},
-            {"sku": "OOR-TSC-BGE-01", "color": "Beige", "fabric": "Tussar Silk", "is_default": False, "stock": 9},
+            {"sku": "OOR-MNG-MUS-01", "color": "Mustard", "fabric": "Mangalgiri Cotton", "is_default": True,  "stock": 14},
+            {"sku": "OOR-MNG-GRY-01", "color": "Grey",    "fabric": "Mangalgiri Cotton", "is_default": False, "stock": 10},
         ],
         "image_count": 2,
     },
+    # --- Pattu › Harini Pattu ----------------------------------------------
     {
-        "slug": "cotton-office-navy",
-        "name": "Pure Cotton Office Saree — Navy",
-        "short_description": "Crisp handloom cotton with a thin contrast border. Office-ready in under five minutes.",
+        "slug": "harini-pattu-soft-silk-rose",
+        "name": "Harini Pattu Soft Silk Saree — Rose Pink",
+        "short_description": "Featherlight soft-silk pattu with a satin sheen and thin zari border.",
         "description": (
-            "100% handloom cotton in deep navy with a one-inch contrast border. "
-            "Stays starched through long meetings, accepts a quick iron well, and "
-            "looks intentional with simple stud earrings and a leather watch."
+            "A soft-silk Harini Pattu in rose pink — weighted to fall beautifully yet "
+            "light enough for all-day wear. A thin gold-zari border and tonal pallu keep "
+            "it understated for daytime functions and house celebrations."
         ),
-        "base_price": Decimal("2199"),
-        "mrp": None,
+        "base_price": Decimal("7499"), "mrp": Decimal("8999"),
+        "tags": ["harini", "pattu", "soft-silk", "festive", "south-indian"],
+        "featured": False, "is_bestseller": False, "is_new": True,
+        "categories": ["harini-pattu", "pattu", "festive", "south-indian", "pink", "5k-15k"],
+        "variants": [
+            {"sku": "OOR-HRP-ROS-01", "color": "Rose Pink", "fabric": "Soft Silk", "is_default": True,  "stock": 9},
+            {"sku": "OOR-HRP-PCH-01", "color": "Peach",     "fabric": "Soft Silk", "is_default": False, "stock": 7},
+        ],
+        "image_count": 2,
+    },
+    # --- Cotton Sarees ------------------------------------------------------
+    {
+        "slug": "cotton-handloom-indigo",
+        "name": "Pure Cotton Handloom Saree — Indigo",
+        "short_description": "Crisp handloom cotton with a thin contrast border. Office-ready in minutes.",
+        "description": (
+            "100% handloom cotton in deep indigo with a one-inch contrast border. Stays "
+            "starched through long meetings, accepts a quick iron well, and pairs with "
+            "simple stud earrings for an effortless workday drape."
+        ),
+        "base_price": Decimal("1999"), "mrp": None,
         "tags": ["cotton", "office", "handloom", "daily"],
-        "featured": False,
-        "is_bestseller": False,
-        "is_new": False,
-        "categories": ["cotton", "office", "navy", "under-5k"],
+        "featured": False, "is_bestseller": True, "is_new": False,
+        "categories": ["cotton-sarees", "office", "daily-wear", "navy", "under-5k"],
         "variants": [
-            {"sku": "OOR-CTN-NVY-01", "color": "Navy",     "fabric": "Cotton Handloom", "is_default": True,  "stock": 15},
+            {"sku": "OOR-CTN-IND-01", "color": "Indigo",   "fabric": "Cotton Handloom", "is_default": True,  "stock": 15},
             {"sku": "OOR-CTN-CHR-01", "color": "Charcoal", "fabric": "Cotton Handloom", "is_default": False, "stock": 12},
             {"sku": "OOR-CTN-OLV-01", "color": "Olive",    "fabric": "Cotton Handloom", "is_default": False, "stock": 10},
         ],
         "image_count": 2,
     },
+    # --- Banaras Sarees (x2) -----------------------------------------------
     {
-        "slug": "banarasi-wedding-red",
-        "name": "Banarasi Wedding Silk — Crimson Red",
-        "short_description": "Heavy katan silk with intricate kadwa weave across body and pallu. A statement bridal piece.",
+        "slug": "banaras-katan-silk-crimson",
+        "name": "Banarasi Katan Silk Saree — Crimson",
+        "short_description": "Heavy katan silk with intricate kadwa weave across body and pallu.",
         "description": (
-            "Pure katan silk woven in Banaras with the painstaking kadwa technique, "
-            "where every motif is woven separately rather than floated. The result is "
-            "a saree that holds its shape, drapes regally, and reads as heirloom from "
-            "the first glance."
+            "Pure katan silk woven in Banaras with the painstaking kadwa technique, where "
+            "every motif is woven separately rather than floated. The result holds its "
+            "shape, drapes regally, and reads as heirloom — a statement bridal piece."
         ),
-        "base_price": Decimal("35000"),
-        "mrp": Decimal("42000"),
+        "base_price": Decimal("35000"), "mrp": Decimal("42000"),
         "tags": ["banarasi", "silk", "wedding", "bridal", "katan", "kadwa"],
-        "featured": True,
-        "is_bestseller": True,
-        "is_new": False,
-        "categories": ["banarasi-silk", "wedding", "bridal", "north-indian", "red", "15k-50k", "wedding-edit"],
+        "featured": True, "is_bestseller": True, "is_new": False,
+        "categories": ["banaras-sarees", "wedding", "bridal", "north-indian", "red", "15k-50k", "wedding-edit"],
         "variants": [
-            {"sku": "OOR-BWR-CRM-01", "color": "Crimson Red", "fabric": "Banarasi Katan Silk", "is_default": True,  "stock": 4},
-            {"sku": "OOR-BWR-MAR-01", "color": "Maroon",      "fabric": "Banarasi Katan Silk", "is_default": False, "stock": 3},
+            {"sku": "OOR-BNK-CRM-01", "color": "Crimson Red", "fabric": "Banarasi Katan Silk", "is_default": True,  "stock": 4},
+            {"sku": "OOR-BNK-MAR-01", "color": "Maroon",      "fabric": "Banarasi Katan Silk", "is_default": False, "stock": 3},
         ],
         "image_count": 3,
     },
     {
-        "slug": "chanderi-pastel-green",
-        "name": "Chanderi Silk Cotton — Pastel Green",
-        "short_description": "Sheer Chanderi weave with delicate buti work. Light as air, elegant for daytime festive.",
+        "slug": "banaras-gold-tissue",
+        "name": "Banarasi Gold Tissue Silk Saree",
+        "short_description": "Lightweight tissue silk with intricate Mughal-era jaal work.",
         "description": (
-            "Genuine Chanderi from Madhya Pradesh — a silk-cotton blend with the "
-            "fabric's trademark sheen and translucency. Pastel green base with "
-            "scattered silver-zari butis and a clean traditional border."
+            "Spun-gold tissue silk woven in Varanasi with a delicate jaal of paisleys and "
+            "floral booti. The fabric catches light beautifully, making it a stand-out for "
+            "Diwali, Karva Chauth, and engagement evenings."
         ),
-        "base_price": Decimal("6799"),
-        "mrp": None,
-        "tags": ["chanderi", "festive", "lightweight", "silk-cotton"],
-        "featured": False,
-        "is_bestseller": False,
-        "is_new": True,
-        "categories": ["chanderi", "festive", "north-indian", "green", "5k-15k"],
+        "base_price": Decimal("18500"), "mrp": Decimal("21000"),
+        "tags": ["banarasi", "silk", "festive", "tissue", "north-indian", "diwali"],
+        "featured": True, "is_bestseller": False, "is_new": False,
+        "categories": ["banaras-sarees", "festive", "north-indian", "gold", "15k-50k", "diwali-2026"],
         "variants": [
-            {"sku": "OOR-CHP-PGN-01", "color": "Pastel Green",  "fabric": "Chanderi Silk Cotton", "is_default": True,  "stock": 11},
-            {"sku": "OOR-CHP-SKY-01", "color": "Sky Blue",      "fabric": "Chanderi Silk Cotton", "is_default": False, "stock": 8},
-            {"sku": "OOR-CHP-LMY-01", "color": "Lemon Yellow",  "fabric": "Chanderi Silk Cotton", "is_default": False, "stock": 7},
-        ],
-        "image_count": 2,
-    },
-    {
-        "slug": "georgette-floral-multicolor",
-        "name": "Georgette Floral Print Saree",
-        "short_description": "Flowing georgette with hand-finished digital florals. Throws on easily for casual outings.",
-        "description": (
-            "Pure georgette in a bright multicolour floral, with a contrast satin "
-            "border and a tassel-finished pallu. Drapes light, packs light — a great "
-            "travel saree for short trips and casual evenings."
-        ),
-        "base_price": Decimal("3299"),
-        "mrp": None,
-        "tags": ["georgette", "floral", "daily", "casual", "lightweight"],
-        "featured": False,
-        "is_bestseller": False,
-        "is_new": False,
-        "categories": ["georgette", "daily-wear", "casual", "multicolor", "under-5k"],
-        "variants": [
-            {"sku": "OOR-GFL-MUL-01", "color": "Multicolor",   "fabric": "Pure Georgette", "is_default": True,  "stock": 14},
-            {"sku": "OOR-GFL-PNY-01", "color": "Pink-Yellow",  "fabric": "Pure Georgette", "is_default": False, "stock": 10},
-        ],
-        "image_count": 2,
-    },
-    {
-        "slug": "patola-double-ikat-royal",
-        "name": "Patola Double Ikat — Royal Blue",
-        "short_description": "Hand-woven Patola from Patan — one of the rarest weaves in India. A genuine collector's saree.",
-        "description": (
-            "Made by the Salvi family of Patan, Gujarat, where double-ikat patola "
-            "weaving has been a closely-guarded family craft for centuries. Every "
-            "thread is hand-dyed and aligned before weaving — a single saree takes "
-            "six to twelve months. Royal blue base with the geometric Pan-Bhat pattern."
-        ),
-        "base_price": Decimal("52000"),
-        "mrp": Decimal("60000"),
-        "tags": ["patola", "double-ikat", "heirloom", "patan", "luxury", "wedding"],
-        "featured": True,
-        "is_bestseller": True,
-        "is_new": False,
-        "categories": ["patola", "wedding", "north-indian", "blue", "above-50k"],
-        "variants": [
-            {"sku": "OOR-PDI-RBL-01", "color": "Royal Blue", "fabric": "Patola Double Ikat", "is_default": True,  "stock": 2},
-            {"sku": "OOR-PDI-WIN-01", "color": "Wine Red",   "fabric": "Patola Double Ikat", "is_default": False, "stock": 2},
+            {"sku": "OOR-BNT-GLD-01", "color": "Gold",         "fabric": "Banarasi Tissue", "is_default": True,  "stock": 6},
+            {"sku": "OOR-BNT-AGD-01", "color": "Antique Gold", "fabric": "Banarasi Tissue", "is_default": False, "stock": 4},
         ],
         "image_count": 3,
     },
+    # --- Designer Sarees ----------------------------------------------------
     {
-        "slug": "linen-half-half-mustard",
-        "name": "Linen Half-Half Saree — Mustard & Black",
-        "short_description": "Contemporary linen weave split half-and-half for an effortless modern silhouette.",
+        "slug": "designer-embroidered-wine",
+        "name": "Designer Embroidered Saree — Wine",
+        "short_description": "Contemporary georgette with hand-embroidered sequin and thread work.",
         "description": (
-            "Pure linen woven in two solid panels — mustard yellow body with a "
-            "deep black pallu. Crisp, breathable, and perfectly suited for warmer "
-            "months. A modern saree that wears well with both jhumkas and stud "
-            "earrings."
+            "A modern designer drape in wine georgette, finished with hand-embroidered "
+            "sequin and resham thread work along the border and pallu. Comes with a "
+            "designer blouse piece — engineered for reception and cocktail evenings."
         ),
-        "base_price": Decimal("3899"),
-        "mrp": None,
-        "tags": ["linen", "contemporary", "daily", "casual"],
-        "featured": False,
-        "is_bestseller": False,
-        "is_new": True,
-        "categories": ["linen", "daily-wear", "casual", "mustard", "under-5k"],
+        "base_price": Decimal("9999"), "mrp": Decimal("12999"),
+        "tags": ["designer", "embroidered", "festive", "sequin", "georgette"],
+        "featured": True, "is_bestseller": False, "is_new": True,
+        "categories": ["designer-sarees", "festive", "wedding", "multicolor", "5k-15k"],
         "variants": [
-            {"sku": "OOR-LHH-MUB-01", "color": "Mustard & Black", "fabric": "Pure Linen", "is_default": True,  "stock": 13},
-            {"sku": "OOR-LHH-INW-01", "color": "Indigo & White",  "fabric": "Pure Linen", "is_default": False, "stock": 9},
+            {"sku": "OOR-DSG-WIN-01", "color": "Wine",       "fabric": "Designer Georgette", "is_default": True,  "stock": 7},
+            {"sku": "OOR-DSG-EMR-01", "color": "Emerald",    "fabric": "Designer Georgette", "is_default": False, "stock": 5},
+        ],
+        "image_count": 3,
+    },
+    # --- Kalamkari Sarees ---------------------------------------------------
+    {
+        "slug": "kalamkari-handpainted-cream",
+        "name": "Kalamkari Hand-Painted Saree — Cream",
+        "short_description": "Pen-Kalamkari narrative motifs hand-painted on a cream cotton body.",
+        "description": (
+            "Authentic pen (srikalahasti) Kalamkari, hand-drawn with a bamboo pen and "
+            "natural dyes on a cream cotton body. Temple and floral narrative panels run "
+            "along the pallu — every saree is unique to the artist's hand."
+        ),
+        "base_price": Decimal("4299"), "mrp": None,
+        "tags": ["kalamkari", "hand-painted", "cotton", "daily", "south-indian"],
+        "featured": False, "is_bestseller": False, "is_new": True,
+        "categories": ["kalamkari-sarees", "daily-wear", "festive", "south-indian", "cream", "under-5k"],
+        "variants": [
+            {"sku": "OOR-KLM-CRM-01", "color": "Cream",    "fabric": "Kalamkari Cotton", "is_default": True,  "stock": 11},
+            {"sku": "OOR-KLM-MUS-01", "color": "Mustard",  "fabric": "Kalamkari Cotton", "is_default": False, "stock": 8},
+        ],
+        "image_count": 2,
+    },
+    # --- Pure Kanjivaram Silk -----------------------------------------------
+    {
+        "slug": "pure-kanjivaram-bridal-maroon",
+        "name": "Pure Kanjivaram Bridal Silk Saree — Maroon",
+        "short_description": "Hand-woven pure mulberry silk with classic temple-border zari work.",
+        "description": (
+            "A heritage piece for the modern bride. Woven by master weavers using pure "
+            "mulberry silk and tested zari, with the classic Mayil Chakkaram motif through "
+            "the body and a wide gold-zari pallu. Comes with a matching unstitched blouse."
+        ),
+        "base_price": Decimal("52000"), "mrp": Decimal("60000"),
+        "tags": ["kanjivaram", "kanchipuram", "silk", "bridal", "wedding", "zari", "south-indian"],
+        "featured": True, "is_bestseller": True, "is_new": False,
+        "categories": ["pure-kanjivaram-silk", "bridal", "wedding", "south-indian", "maroon", "above-50k", "wedding-edit"],
+        "variants": [
+            {"sku": "OOR-PKJ-MAR-01", "color": "Maroon",     "fabric": "Pure Kanjivaram Silk", "is_default": True,  "stock": 3},
+            {"sku": "OOR-PKJ-RED-01", "color": "Deep Red",   "fabric": "Pure Kanjivaram Silk", "is_default": False, "stock": 2},
+            {"sku": "OOR-PKJ-BLU-01", "color": "Royal Blue", "fabric": "Pure Kanjivaram Silk", "is_default": False, "stock": 2},
+        ],
+        "image_count": 3,
+    },
+    # --- Fancy Sarees -------------------------------------------------------
+    {
+        "slug": "fancy-georgette-floral",
+        "name": "Fancy Georgette Floral Saree",
+        "short_description": "Flowing georgette with digital florals and a tassel-finished pallu.",
+        "description": (
+            "Pure georgette in a bright multicolour floral with a contrast satin border "
+            "and a tassel-finished pallu. Drapes light, packs light — an easy throw-on for "
+            "casual outings and short trips."
+        ),
+        "base_price": Decimal("2799"), "mrp": None,
+        "tags": ["fancy", "georgette", "floral", "casual", "lightweight"],
+        "featured": False, "is_bestseller": False, "is_new": False,
+        "categories": ["fancy-sarees", "casual", "daily-wear", "multicolor", "under-5k"],
+        "variants": [
+            {"sku": "OOR-FNG-MUL-01", "color": "Multicolor",  "fabric": "Pure Georgette", "is_default": True,  "stock": 14},
+            {"sku": "OOR-FNG-PNK-01", "color": "Pink-Yellow", "fabric": "Pure Georgette", "is_default": False, "stock": 10},
+        ],
+        "image_count": 2,
+    },
+    # --- Kanchipattu --------------------------------------------------------
+    {
+        "slug": "kanchipattu-traditional-green",
+        "name": "Kanchipattu Traditional Silk Saree — Bottle Green",
+        "short_description": "Traditional Kanchipattu silk with a contrast korvai border and rich pallu.",
+        "description": (
+            "A traditional Kanchipattu in bottle green with a contrast magenta korvai "
+            "border woven in by the three-shuttle technique, and a gold-zari pallu of "
+            "annam (swan) motifs. A classic temple-wedding silk at an accessible weight."
+        ),
+        "base_price": Decimal("21999"), "mrp": Decimal("25999"),
+        "tags": ["kanchipattu", "kanchipuram", "silk", "festive", "wedding", "south-indian"],
+        "featured": False, "is_bestseller": True, "is_new": False,
+        "categories": ["kanchi-pattu-saree", "festive", "wedding", "south-indian", "green", "15k-50k", "diwali-2026"],
+        "variants": [
+            {"sku": "OOR-KPT-GRN-01", "color": "Bottle Green", "fabric": "Kanchipattu Silk", "is_default": True,  "stock": 5},
+            {"sku": "OOR-KPT-MAG-01", "color": "Magenta",      "fabric": "Kanchipattu Silk", "is_default": False, "stock": 4},
+        ],
+        "image_count": 3,
+    },
+    # --- Cocktail & Party Wear ----------------------------------------------
+    {
+        "slug": "cocktail-sequin-party-black",
+        "name": "Cocktail Sequin Party Saree — Black",
+        "short_description": "Pre-draped-friendly sequin saree with a stitched-ready pallu for evenings.",
+        "description": (
+            "A full-sequin party saree in classic black on a soft net base, with a "
+            "ready-to-pleat finish and a designer blouse piece. Built for cocktail "
+            "evenings, sangeets, and receptions where you want to shimmer."
+        ),
+        "base_price": Decimal("8499"), "mrp": Decimal("10999"),
+        "tags": ["cocktail", "party", "sequin", "festive", "designer"],
+        "featured": False, "is_bestseller": False, "is_new": True,
+        "categories": ["cocktail-party-wear-sarees", "festive", "navy", "5k-15k"],
+        "variants": [
+            {"sku": "OOR-CCK-BLK-01", "color": "Black",     "fabric": "Sequin Net", "is_default": True,  "stock": 8},
+            {"sku": "OOR-CCK-NVY-01", "color": "Navy",      "fabric": "Sequin Net", "is_default": False, "stock": 6},
+            {"sku": "OOR-CCK-WIN-01", "color": "Wine",      "fabric": "Sequin Net", "is_default": False, "stock": 5},
         ],
         "image_count": 2,
     },
@@ -320,17 +428,17 @@ BANNERS: list[dict[str, Any]] = [
         "subtitle": "Festive sarees crafted on traditional looms across India",
         "placement": BannerPlacement.HOMEPAGE_HERO,
         "cta_label": "Shop the edit",
-        "cta_url": "/shop?collection=diwali-2026",
+        "cta_url": "/saris?collection=diwali-2026",
         "image_seed": "oorvashee-banner-diwali-hero",
         "category_slug": "diwali-2026",
         "display_order": 1,
     },
     {
         "title": "Wedding Edit",
-        "subtitle": "Bridal Kanchipurams, Banarasis, and heirloom Patolas",
+        "subtitle": "Bridal Kanjivarams, Banarasis, and heirloom silks",
         "placement": BannerPlacement.HOMEPAGE_SECONDARY,
         "cta_label": "Explore",
-        "cta_url": "/shop?collection=wedding-edit",
+        "cta_url": "/saris?collection=wedding-edit",
         "image_seed": "oorvashee-banner-wedding",
         "category_slug": "wedding-edit",
         "display_order": 2,
@@ -340,7 +448,7 @@ BANNERS: list[dict[str, Any]] = [
         "subtitle": "Heirloom-grade silks for the modern bride",
         "placement": BannerPlacement.CATEGORY_TOP,
         "cta_label": "Browse bridal",
-        "cta_url": "/shop?occasion=bridal",
+        "cta_url": "/saris?occasion=bridal",
         "image_seed": "oorvashee-banner-bridal-top",
         "category_slug": "bridal",
         "display_order": 1,
