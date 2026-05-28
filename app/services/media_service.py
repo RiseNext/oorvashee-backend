@@ -194,25 +194,15 @@ class MediaService(BaseService):
             )
         )
 
-        # Stamp the context onto the upload as Cloudinary metadata —
-        # easy admin-side filter later ("show all category banners").
-        # Pre-formed `key=value|key=value` value; the `context=` param name is
-        # added during signature canonicalisation, so we must NOT prefix it here
-        # (a redundant prefix yields `context=context=...` → Invalid Signature).
-        # Every segment MUST be `key=value` — Cloudinary normalises a keyless
-        # segment during verification, so the media type carries a `media=` key.
-        cl_context = f"media={req.context.value}"
-        if req.entity_id:
-            cl_context += f"|entity_id={req.entity_id}"
-
+        # Only stable, deterministic fields are signed (timestamp/folder/eager/
+        # public_id). Metadata constraints (allowed_formats/max_file_size/tags/
+        # context) are intentionally NOT signed or sent — they caused
+        # Cloudinary canonicalisation mismatches; the signed `folder` already
+        # scopes the asset.
         envelope = self._client().build_signed_envelope(
             folder=folder,
             eager=config.eager,
-            allowed_formats=config.allowed_formats,
-            max_file_size=config.max_bytes,
             resource_type=config.resource_type,
-            tags=[*req.tags, f"ctx:{req.context.value}"],
-            context=cl_context,
         )
 
         log.info(
@@ -231,12 +221,8 @@ class MediaService(BaseService):
             upload_url=envelope.upload_url,
             folder=envelope.folder,
             eager=envelope.eager,
-            allowed_formats=envelope.allowed_formats,
-            max_file_size=envelope.max_file_size,
             resource_type=envelope.resource_type,
             public_id=envelope.public_id,
-            tags=envelope.tags,
-            context=envelope.context,
             expires_in_seconds=settings.cloudinary_signature_ttl_seconds,
         )
 
