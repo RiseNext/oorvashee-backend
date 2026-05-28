@@ -72,7 +72,15 @@ def sign_params(params: dict[str, Any], api_secret: str) -> str:
     the official Cloudinary widget defaults to it.
     """
     canonical = _canonicalize(params)
-    return hashlib.sha1((canonical + api_secret).encode("utf-8")).hexdigest()  # noqa: S324
+    signature = hashlib.sha1((canonical + api_secret).encode("utf-8")).hexdigest()  # noqa: S324
+    # TEMPORARY forensic debug — REMOVE after diagnosing Cloudinary 401.
+    # Logs the EXACT byte string Cloudinary will re-hash (no api_secret here).
+    log.warning(
+        "DEBUG_cloudinary_canonical",
+        canonical=canonical,
+        signature=signature,
+    )
+    return signature
 
 
 def verify_upload_response(response: dict[str, Any], api_secret: str) -> bool:
@@ -176,6 +184,18 @@ class CloudinaryClient:
             params["context"] = "|".join(f"{k}={v}" for k, v in context.items())
 
         signature = sign_params(params, self._api_secret)
+
+        # TEMPORARY forensic debug — REMOVE after diagnosing Cloudinary 401.
+        # Every signed parameter + the public identifiers (NOT the api_secret).
+        log.warning(
+            "DEBUG_cloudinary_signed_envelope",
+            cloud_name=self._cloud_name,
+            api_key=self._api_key,
+            timestamp=ts,
+            signed_params=params,
+            signature=signature,
+            upload_url=self.upload_url(resource_type=resource_type),
+        )
 
         return SignedUploadEnvelope(
             cloud_name=self._cloud_name,
