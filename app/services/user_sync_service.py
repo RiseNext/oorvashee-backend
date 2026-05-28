@@ -28,6 +28,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from app.core.logging import get_logger
+from app.core.validators import is_plausible_email
 from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.user_profile import UserProfile
@@ -117,15 +118,17 @@ class UserSyncService(BaseService):
 
     async def _create(self, clerk_user: ClerkUser) -> User:
         email = clerk_user.primary_email
-        if not email:
-            # Without an email we can't satisfy the NOT NULL + UNIQUE constraint
-            # on `users.email`. Skip and log loudly — better than poisoning the
-            # table with junk placeholder addresses.
+        if not is_plausible_email(email):
+            # Without a valid email we can't satisfy the NOT NULL + UNIQUE
+            # constraint on `users.email`. Skip and log loudly — better than
+            # poisoning the table with junk/placeholder addresses. (The webhook
+            # payload normally carries a real address; this guards against
+            # malformed/template-literal values defensively.)
             log.error(
-                "clerk_user_create_missing_email",
+                "clerk_user_create_invalid_email",
                 clerk_user_id=clerk_user.id,
             )
-            raise ValueError("Clerk user payload has no email address")
+            raise ValueError("Clerk user payload has no valid email address")
 
         user = User(
             clerk_user_id=clerk_user.id,

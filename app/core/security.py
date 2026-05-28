@@ -273,7 +273,9 @@ def require_role(*allowed_roles: str):  # type: ignore[no-untyped-def]
 # depend on this rather than on `get_current_principal` directly.
 
 from sqlalchemy import select  # noqa: E402
+from sqlalchemy.exc import IntegrityError  # noqa: E402
 
+from app.core.validators import is_plausible_email  # noqa: E402
 from app.db.deps import DbSession  # noqa: E402
 from app.models.user import User  # noqa: E402
 
@@ -288,34 +290,64 @@ async def get_current_user(
     1. Clerk webhook hasn't landed yet (Cycle 4).
     2. Webhook lag — JWT issued faster than Svix delivery.
 
-    `email` is sourced from the JWT claim. Clerk includes it by default in
-    the standard token template; if your Clerk session template omits it,
-    add `{"email": "{{user.primary_email_address}}"}`.
+    `email` comes from the JWT `email` claim, which the Clerk **"backend"**
+    template (frontend `NEXT_PUBLIC_CLERK_JWT_TEMPLATE`) sets via the
+    `{{user.primary_email_address}}` shortcode. We hard-validate it before
+    persisting: a missing claim — or an UNRENDERED template literal such as
+    `{{user.primary_email_address.email_address}}` from a misconfigured
+    template — must never be written, or it poisons UNIQUE(users.email) and
+    breaks every subsequent signup.
     """
     stmt = select(User).where(User.clerk_user_id == principal.clerk_user_id)
     user = (await session.execute(stmt)).scalar_one_or_none()
     if user is not None:
         return user
 
-    # First-touch provisioning. Email is the only required claim beyond
-    # `sub`; if it's missing we fail loudly so the auth flow gets fixed,
-    # rather than store a junk placeholder.
-    if not principal.email:
+    # First-touch provisioning. Reject empty AND junk (template-literal) emails
+    # loudly so the auth flow gets fixed, rather than storing a poison value.
+    if not is_plausible_email(principal.email):
         log.error(
-            "user_autoprovision_missing_email",
+            "user_autoprovision_invalid_email",
             clerk_user_id=principal.clerk_user_id,
         )
-        raise AuthenticationError("JWT missing `email` claim — fix Clerk session template")
+        raise AuthenticationError(
+            "JWT `email` claim missing or invalid — check the Clerk 'backend' JWT template",
+            code="invalid_email_claim",
+        )
 
-    user = User(
-        clerk_user_id=principal.clerk_user_id,
-        email=principal.email,
-    )
-    session.add(user)
-    await session.flush()
-    log.info(
-        "user_autoprovisioned",
-        user_id=str(user.id),
-        clerk_user_id=principal.clerk_user_id,
-    )
-    return user
+    # Provision inside a SAVEPOINT so a UNIQUE collision doesn't poison the
+    # request transaction. Two collisions are possible:
+    #   - a concurrent request already provisioned this clerk user (race) —
+    #     re-query by clerk_user_id and return that row; or
+    #   - the email belongs to a DIFFERENT clerk user (legacy corrupted data) —
+    #     surface a clear 401 instead of a 500.
+    try:
+        async with session.begin_nested():
+            user = User(
+                clerk_user_id=principal.clerk_user_id,
+                email=principal.email,
+            )
+            session.add(user)
+            await session.flush()
+        log.info(
+            "user_autoprovisioned",
+            user_id=str(user.id),
+            clerk_user_id=principal.clerk_user_id,
+        )
+        return user
+    except IntegrityError:
+        existing = (
+            await session.execute(
+                select(User).where(User.clerk_user_id == principal.clerk_user_id)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
+        log.error(
+            "user_autoprovision_email_conflict",
+            clerk_user_id=principal.clerk_user_id,
+        )
+        raise AuthenticationError(
+            "Could not provision account — email already in use by another identity.",
+            code="email_conflict",
+        ) from None
