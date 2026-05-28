@@ -199,7 +199,9 @@ class MediaService(BaseService):
         # Pre-formed `key=value|key=value` value; the `context=` param name is
         # added during signature canonicalisation, so we must NOT prefix it here
         # (a redundant prefix yields `context=context=...` → Invalid Signature).
-        cl_context = req.context.value
+        # Every segment MUST be `key=value` — Cloudinary normalises a keyless
+        # segment during verification, so the media type carries a `media=` key.
+        cl_context = f"media={req.context.value}"
         if req.entity_id:
             cl_context += f"|entity_id={req.entity_id}"
 
