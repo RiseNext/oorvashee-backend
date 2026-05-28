@@ -78,7 +78,7 @@ variant (`variant.fabric`) and the department names already convey weave.
 | **Hierarchy** via existing `parent_id` | "Pattu" is a real parent row; its 5 weaves set `parent_id = pattu`. Model already supported this. |
 | **Parent gets the union** — Pattu-child products are linked to BOTH the child AND `pattu` | So `/saris/pattu` shows all silk-weave products without recursive querying; `/saris/gadwal-silk-sarees` shows just Gadwal. Standard ancestor-tagging denormalisation. |
 | Display copy (title/subtitle/SEO) lives on the **category row** (`name`, `description`, `seo_*`) | Single source of truth; frontend reads it, no hardcoded copy. `description` is now exposed on `CategorySummary`. |
-| Old fabric categories + old demo products **deleted on reseed** (legacy slug lists) | Removes duplicate meaning + orphans from Neon cleanly. |
+| Old fabric categories + old demo products **archived/deactivated** (never deleted) by the merchandising sync | Production DB has order history — deletes are unsafe. See [MERCHANDISING_SYNC.md](MERCHANDISING_SYNC.md). |
 
 ### Slug strategy
 - Slugs = approved frontend slugs, lowercase-kebab, **immutable** (URL + SEO
@@ -95,7 +95,7 @@ variant (`variant.fabric`) and the department names already convey weave.
 | File | Change |
 |---|---|
 | `app/seeds/data.py` | `CATEGORIES` rebuilt to the canonical tree (kind=collection + parent_slug + description/seo) + kept facets; `PRODUCTS` re-themed to populate every department with correct department/parent/facet links; `LEGACY_CATEGORY_SLUGS` + `LEGACY_PRODUCT_SLUGS` for migration cleanup |
-| `app/seeds/runner.py` | `_seed_categories` sets description/seo/image + second pass resolves `parent_slug → parent_id`; `reset_seeds` also deletes legacy slugs |
+| `app/seeds/sync.py` + `runner.py` | The category/product/variant/inventory/image/banner reconciliation now lives in the non-destructive `MerchandisingSync`; `run_seeds` delegates to it; `reset_seeds` was **removed**. See [MERCHANDISING_SYNC.md](MERCHANDISING_SYNC.md) |
 | `app/schemas/category.py` | `CategorySummary` gains `description` (display copy, single source of truth) |
 | frontend `lib/catalog/category-map.ts` | **Retired** — slugs now match; `/saris/[category]` resolves directly from the backend category (name + description). Breadcrumbs/home use real slugs. |
 
@@ -111,14 +111,15 @@ environment, apply + verify these steps against the live DB:
 
 ```bash
 cd BACKEND
-# 1. Deploy the new code (seed data + runner + schema read change).
+# 1. Deploy the new code (seed data + sync service + schema read change).
 #    No `alembic upgrade` needed — there is NO schema migration.
 git pull && uv sync
 
-# 2. Reseed: wipes legacy + current seed-owned rows, applies canonical taxonomy.
-#    Refuses if APP_ENV=prod (catalog is admin-owned in prod).
-uv run python -m scripts.seed_dev reseed --yes
-uv run python -m scripts.seed_dev status     # confirm category + product counts
+# 2. Apply the canonical taxonomy via the PRODUCTION-SAFE sync (upsert +
+#    archive/deactivate; never deletes — order history is preserved).
+uv run python -m scripts.sync_catalog sync --dry-run   # preview (rolls back)
+uv run python -m scripts.sync_catalog sync --yes       # apply (--yes for prod)
+uv run python -m scripts.sync_catalog status           # confirm counts
 
 # 3. Sanity
 curl "$API/api/v1/categories" | jq '.collection[].slug'   # canonical slugs
@@ -126,11 +127,10 @@ curl "$API/api/v1/products?category=pattu" | jq '.total'   # parent union > 0
 curl "$API/api/v1/products?category=banaras-sarees" | jq '.total'
 ```
 
-**Production note:** `seed_dev` refuses `APP_ENV=prod`. Real production catalog
-is created via the admin dashboard. For a prod bootstrap of the canonical
-*categories* (no demo products), create the categories through the admin
-category API using the slugs/hierarchy in §2 (or add a dedicated
-`bootstrap_prod.py` — do not repurpose dev seeds).
+**This is now non-destructive and production-safe** — full architecture +
+verification (incl. orphan-relation SQL) in [MERCHANDISING_SYNC.md](MERCHANDISING_SYNC.md).
+The old fabric categories + pre-alignment demo products are **archived/
+deactivated**, not deleted, so any orders against them stay intact.
 
 ---
 

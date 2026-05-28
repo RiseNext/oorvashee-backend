@@ -104,13 +104,16 @@ CATEGORIES: list[dict[str, Any]] = [
 ]
 
 
-# Legacy slugs to delete on reseed so the old (pre-alignment) taxonomy + demo
-# catalog don't linger in Neon as orphans / duplicate meaning.
-LEGACY_CATEGORY_SLUGS: list[str] = [
+# Retired slugs — the pre-alignment taxonomy + demo catalog. These are NEVER
+# hard-deleted (they may be referenced by order_items / order history). The
+# merchandising sync ARCHIVES retired products (status=archived, unpublished)
+# and DEACTIVATES retired categories (is_active=false). Slugs + IDs stay stable
+# forever, preserving order history and any indexed URLs.
+RETIRED_CATEGORY_SLUGS: list[str] = [
     "kanchipuram-silk", "banarasi-silk", "mysore-silk", "tussar-silk",
     "chanderi", "patola", "georgette", "cotton", "linen",
 ]
-LEGACY_PRODUCT_SLUGS: list[str] = [
+RETIRED_PRODUCT_SLUGS: list[str] = [
     "kanchipuram-bridal-maroon", "banarasi-gold-tissue", "mysore-soft-silk-pink",
     "tussar-cream-daily", "cotton-office-navy", "banarasi-wedding-red",
     "chanderi-pastel-green", "georgette-floral-multicolor",

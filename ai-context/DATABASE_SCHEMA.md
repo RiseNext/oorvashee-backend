@@ -144,15 +144,20 @@ Indexed via GIN (`ix_products_search_vector`). Queries use `plainto_tsquery('eng
 
 ---
 
-## 6a. Seed System
+## 6a. Catalog Merchandising Sync (production-safe)
 
-[`app/seeds/`](../app/seeds/) provides dev/staging seed data:
+[`app/seeds/`](../app/seeds/) reconciles the canonical catalog into any database
+**non-destructively** — safe even against production with live order history.
+Full architecture: [MERCHANDISING_SYNC.md](MERCHANDISING_SYNC.md).
 
-- **`data.py`** — declarative tables of categories, products, banners. Editable by anyone; loaders resolve cross-references (product → category slugs → IDs) at apply time.
-- **`runner.py`** — `run_seeds` / `reset_seeds` / `seed_status` async functions. Idempotent on natural keys (slug, SKU, title+placement). Mutable fields (price, description, stock) are refreshed on re-run via `update_fields`.
-- **`base.py`** — `get_or_create` helper + `SeedReport` aggregator + placeholder image URL helper.
+- **`data.py`** — declarative canonical categories/products/banners + `RETIRED_*` slug lists. Loaders resolve cross-references (product → category slugs, `parent_slug` → parent id) at apply time.
+- **`sync.py`** — `MerchandisingSync`: UPSERT categories (slug) / products (slug) / variants (SKU) / inventory (variant_id) / banners; **archive** retired products (`status=archived`) + **deactivate** retired categories (`is_active=false`). **Contains no DELETE/TRUNCATE** — IDs stay stable, order history preserved. Idempotent.
+- **`runner.py`** — `run_seeds` (delegates to the sync) + `seed_status` (verification counts). `reset_seeds` **removed** (it hard-deleted order-referenced rows — the incident this replaced).
+- **`base.py`** — `get_or_create` + `SeedReport` + placeholder image helpers.
 
-CLI: `python -m scripts.seed_dev {run | reset --yes | reseed --yes | status}`. Refuses to execute when `APP_ENV=prod`. Use a separate `bootstrap_prod.py` for production-only bootstrap data (admin user, T&Cs, system categories) — never repurpose this script.
+CLIs:
+- **`python -m scripts.sync_catalog {sync [--dry-run] [--yes] | status}`** — production-capable; `--dry-run` previews (rolls back); `--yes` required to apply on `APP_ENV=prod`.
+- `python -m scripts.seed_dev {run | status}` — dev convenience; refuses `APP_ENV=prod`.
 
 **Why the seeds don't write to `audit_logs`:** the seed system bypasses service-layer auditing on purpose. Audit rows describe human/admin actions; seed-applied rows describe a machine-managed dev environment. If you need an audit trail for production bootstrap, write it explicitly in the bootstrap script.
 

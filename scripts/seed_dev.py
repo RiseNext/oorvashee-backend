@@ -1,17 +1,18 @@
-"""Dev / staging seed CLI.
+"""Dev / staging catalog seed CLI (convenience wrapper).
 
 Commands:
-    uv run python -m scripts.seed_dev run            # idempotent apply
-    uv run python -m scripts.seed_dev reset --yes    # delete seed-owned rows
-    uv run python -m scripts.seed_dev reseed --yes   # reset + run
-    uv run python -m scripts.seed_dev status         # show row counts
+    uv run python -m scripts.seed_dev run       # idempotent, non-destructive sync
+    uv run python -m scripts.seed_dev status    # show row counts
+
+This wraps the production-safe `MerchandisingSync` (app/seeds/sync.py). There
+is NO `reset`/`reseed` any more — retirement is archive/deactivate, never
+delete, so order history and referenced rows are always preserved.
 
 Safety:
-- ANY command refuses if `APP_ENV=prod`. Production catalog data is owned by
-  the admin dashboard, not this script. If you need a one-time production
-  bootstrap (system categories, admin user, T&Cs), build a separate
-  `bootstrap_prod.py` — don't repurpose dev seeds.
-- `reset` / `reseed` require an explicit `--yes` flag to avoid accidents.
+- This convenience CLI refuses if `APP_ENV=prod`. To apply the canonical
+  catalog to a production database (which is safe — the sync is
+  non-destructive), use `scripts/sync_catalog.py`, which supports a `--dry-run`
+  preview and an explicit prod confirmation.
 - Every command prints the resolved DB host before touching anything.
 """
 
@@ -31,25 +32,14 @@ from app.db.session import (
     session_scope,
     set_db_state,
 )
-from app.seeds.runner import reset_seeds, run_seeds, seed_status
+from app.seeds.runner import run_seeds, seed_status
 
 
 def _sanitize_host(url: str) -> str:
-    """Mask user/pass; surface only driver + host + db for the safety banner."""
     return re.sub(r"://[^@]+@", "://***:***@", url)
 
 
-def _refuse_prod_or_exit(settings: object) -> None:
-    if getattr(settings, "app_env", None) is AppEnv.PROD:
-        print(
-            "ERROR: Refusing to run dev seeds against APP_ENV=prod.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-
 async def _with_db(coro_factory):  # type: ignore[no-untyped-def]
-    """Bring up engine + sessionmaker for the lifetime of one command."""
     settings = get_settings()
     configure_logging(settings)
     log = get_logger("scripts.seed_dev")
@@ -65,39 +55,11 @@ async def _with_db(coro_factory):  # type: ignore[no-untyped-def]
         await dispose_engine()
 
 
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
-
-
 async def cmd_run() -> None:
     async def _do(session, log):  # type: ignore[no-untyped-def]
         report = await run_seeds(session)
-        log.info("seed_complete", **dict(report.created))
-        print("Seed complete:")
-        for line in report.lines():
-            print(line)
-
-    await _with_db(_do)
-
-
-async def cmd_reset() -> None:
-    async def _do(session, log):  # type: ignore[no-untyped-def]
-        report = await reset_seeds(session)
-        log.warning("seed_reset_complete", deleted=dict(report.updated))
-        print("Seed reset complete (rows deleted):")
-        for k in sorted(report.updated):
-            print(f"  {k:24s}  deleted={report.updated[k]:>3}")
-
-    await _with_db(_do)
-
-
-async def cmd_reseed() -> None:
-    async def _do(session, log):  # type: ignore[no-untyped-def]
-        await reset_seeds(session)
-        report = await run_seeds(session)
-        log.info("seed_reseed_complete")
-        print("Reseed complete:")
+        log.info("merchandising_sync_complete", **dict(report.created))
+        print("Merchandising sync complete:")
         for line in report.lines():
             print(line)
 
@@ -108,43 +70,32 @@ async def cmd_status() -> None:
     async def _do(session, log):  # type: ignore[no-untyped-def]
         del log
         counts = await seed_status(session)
-        print("Seed-owned row counts:")
+        print("Catalog row counts:")
         for k in sorted(counts):
-            print(f"  {k:24s}  {counts[k]:>5}")
+            print(f"  {k:30s}  {counts[k]:>5}")
 
     await _with_db(_do)
-
-
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="seed_dev",
-        description="Dev / staging seed CLI for the Oorvashee catalog.",
+        description="Dev / staging catalog sync CLI (non-destructive).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-
-    sub.add_parser("run", help="Apply seeds idempotently.")
-
-    p_reset = sub.add_parser(
-        "reset", help="Delete every seed-owned row (categories, products, banners)."
-    )
-    p_reset.add_argument(
-        "--yes", action="store_true", help="Confirm the destructive operation.",
-    )
-
-    p_reseed = sub.add_parser("reseed", help="Reset then run. Requires --yes.")
-    p_reseed.add_argument("--yes", action="store_true")
-
-    sub.add_parser("status", help="Print counts of seed-owned rows in the DB.")
+    sub.add_parser("run", help="Apply the canonical catalog idempotently (sync).")
+    sub.add_parser("status", help="Print catalog row counts.")
 
     args = parser.parse_args()
 
     settings = get_settings()
-    _refuse_prod_or_exit(settings)
+    if settings.app_env is AppEnv.PROD:
+        print(
+            "ERROR: seed_dev refuses APP_ENV=prod. Use `scripts/sync_catalog.py` "
+            "(production-safe, supports --dry-run) to sync the prod catalog.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     print(
         f"[seed_dev] env={settings.app_env.value}  "
@@ -152,19 +103,8 @@ def main() -> None:
         file=sys.stderr,
     )
 
-    if args.command in {"reset", "reseed"} and not args.yes:
-        print(
-            f"ERROR: `{args.command}` is destructive. Re-run with --yes to confirm.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
     if args.command == "run":
         asyncio.run(cmd_run())
-    elif args.command == "reset":
-        asyncio.run(cmd_reset())
-    elif args.command == "reseed":
-        asyncio.run(cmd_reseed())
     elif args.command == "status":
         asyncio.run(cmd_status())
 

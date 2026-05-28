@@ -14,10 +14,14 @@ merchandising structure is canonical** and the backend/Neon data matches it
 (slugs == storefront slugs, "Pattu" parent hierarchy via `parent_id`,
 `kind=collection`; old fabric categories dropped; demo products re-themed to
 populate every department; `CategorySummary` gained `description`).
-**No schema migration** (columns/enum already existed) — apply with
-`uv run python -m scripts.seed_dev reseed --yes`.
+**No schema migration** (columns/enum already existed). Applied via the
+**production-safe merchandising sync** (`scripts/sync_catalog.py`) — an
+idempotent, **non-destructive** upsert + archive/deactivate (never deletes, so
+order history is preserved). This replaced the old destructive seed
+`reset`/`reseed`, which hard-deleted order-referenced products and failed.
 
-**Authoritative spec + audit + runbook:** [TAXONOMY.md](TAXONOMY.md).
+**Authoritative specs:** [TAXONOMY.md](TAXONOMY.md) (canonical taxonomy) +
+[MERCHANDISING_SYNC.md](MERCHANDISING_SYNC.md) (sync architecture + runbook).
 
 ---
 
@@ -242,7 +246,7 @@ Verified end-to-end against live Neon: cart add → checkout quote → place COD
 
 **Earlier session (seed system) shipped:**
 - `app/seeds/` package — `base.py` (helpers), `data.py` (declarative seed data), `runner.py` (orchestration). 33 categories, 10 sarees with 24 variants + 24 placeholder images + 53 category links, 4 banners.
-- `scripts/seed_dev.py` CLI — `run` / `reset --yes` / `reseed --yes` / `status`, all refusing if `APP_ENV=prod`.
+- Catalog merchandising sync — `scripts/sync_catalog.py` (`sync [--dry-run] [--yes]` / `status`), production-safe & non-destructive; `scripts/seed_dev.py` (`run` / `status`) for dev. (The old destructive `reset`/`reseed` was removed — see [MERCHANDISING_SYNC.md](MERCHANDISING_SYNC.md).)
 - Idempotency on natural keys (slug, SKU, title+placement); re-running mutates only changed `update_fields`.
 - Found + fixed two latent model bugs while bringing seeds online: `User.roles` foreign_keys ambiguity, and the SQLAlchemy `postgresql.ENUM` default-to-`.name` issue (now wrapped by `app.models.enums.pg_enum`).
 - Catalog APIs (`/products`, `/products/{slug}`, `/categories`) verified end-to-end against the seeded Neon DB.
@@ -388,11 +392,10 @@ Health:
 - `GET    /api/v1/health` · `GET /api/v1/health/live`
 - `GET    /docs` (Swagger; disabled in prod)
 
-Seed CLI:
+Catalog sync CLI (production-safe, non-destructive — see MERCHANDISING_SYNC.md):
 ```powershell
-uv run python -m scripts.seed_dev status
-uv run python -m scripts.seed_dev run
-uv run python -m scripts.seed_dev reset --yes      # destructive
-uv run python -m scripts.seed_dev reseed --yes     # reset + run
-# All commands refuse if APP_ENV=prod.
+uv run python -m scripts.sync_catalog sync --dry-run   # preview (rolls back)
+uv run python -m scripts.sync_catalog sync --yes       # apply (--yes for prod)
+uv run python -m scripts.sync_catalog status           # row counts
+uv run python -m scripts.seed_dev run                  # dev convenience (refuses prod)
 ```
