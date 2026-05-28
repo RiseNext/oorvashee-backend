@@ -749,11 +749,15 @@ class AdminProductService(BaseService):
 
     # ---------- Response mapping --------------------------------------------
 
-    @staticmethod
-    async def _variant_read(variant: ProductVariant) -> AdminVariantRead:
-        # Caller is expected to have loaded `variant.inventory` already, but
-        # we defend against a None inventory just in case (defensive shape).
-        inv = variant.inventory
+    async def _variant_read(self, variant: ProductVariant) -> AdminVariantRead:
+        # Load inventory with an explicit query rather than the `variant.inventory`
+        # relationship: the variant is freshly created/updated here, so the
+        # relationship is unloaded and touching it under the async session
+        # triggers an implicit lazy load (MissingGreenletError) during response
+        # serialization. Querying explicitly is the codebase's async-safe pattern.
+        inv = await self.session.scalar(
+            select(Inventory).where(Inventory.variant_id == variant.id)
+        )
         stock = inv.stock if inv else 0
         reserved = inv.reserved if inv else 0
         threshold = inv.low_stock_threshold if inv else 0
