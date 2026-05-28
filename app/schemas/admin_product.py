@@ -256,5 +256,6 @@ class AdminProductListItem(BaseModel):
     primary_image_url: str | None
     total_stock: int
     variant_count: int
+    categories: list[str] = Field(default_factory=list, description="Linked category names.")
     published_at: datetime | None
     updated_at: datetime

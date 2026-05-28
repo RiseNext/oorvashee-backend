@@ -132,6 +132,18 @@ class AdminProductService(BaseService):
             for pid, url in (await self.session.execute(img_stmt)).all():
                 primary_image_urls[pid] = url
 
+        # Category names per product — one batched join, not per-row.
+        category_map: dict[uuid.UUID, list[str]] = {}
+        if product_rows:
+            cat_stmt = (
+                select(ProductCategory.product_id, Category.name)
+                .join(Category, Category.id == ProductCategory.category_id)
+                .where(ProductCategory.product_id.in_([p.id for p in product_rows]))
+                .order_by(Category.display_order, Category.name)
+            )
+            for pid, cname in (await self.session.execute(cat_stmt)).all():
+                category_map.setdefault(pid, []).append(cname)
+
         items = [
             AdminProductListItem(
                 id=p.id,
@@ -146,6 +158,7 @@ class AdminProductService(BaseService):
                 primary_image_url=primary_image_urls.get(p.id),
                 total_stock=stock_map.get(p.id, (0, 0))[0],
                 variant_count=stock_map.get(p.id, (0, 0))[1],
+                categories=category_map.get(p.id, []),
                 published_at=p.published_at,
                 updated_at=p.updated_at,
             )
