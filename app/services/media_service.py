@@ -196,9 +196,12 @@ class MediaService(BaseService):
 
         # Stamp the context onto the upload as Cloudinary metadata —
         # easy admin-side filter later ("show all category banners").
-        cl_context = {"context": req.context.value}
+        # Pre-formed `key=value|key=value` value; the `context=` param name is
+        # added during signature canonicalisation, so we must NOT prefix it here
+        # (a redundant prefix yields `context=context=...` → Invalid Signature).
+        cl_context = req.context.value
         if req.entity_id:
-            cl_context["entity_id"] = str(req.entity_id)
+            cl_context += f"|entity_id={req.entity_id}"
 
         envelope = self._client().build_signed_envelope(
             folder=folder,

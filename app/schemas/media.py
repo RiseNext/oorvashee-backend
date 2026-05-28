@@ -58,7 +58,9 @@ class UploadSignResponse(BaseModel):
     resource_type: str
     public_id: str | None
     tags: list[str]
-    context: dict[str, str]
+    # Pre-formed Cloudinary contextual-metadata value (`key=value|key=value`),
+    # transmitted to Cloudinary verbatim (matches the signed value exactly).
+    context: str
     # Informational — TTL the signature stays valid (Cloudinary uses ~1h
     # by default; we surface it so the frontend can refresh proactively).
     expires_in_seconds: int

@@ -195,6 +195,44 @@ def test_envelope_signature_is_verifiable_by_independent_recompute() -> None:
     assert sign_params(submitted, "my-test-secret") == env.signature
 
 
+def test_context_value_signed_verbatim_without_redundant_prefix() -> None:
+    """Regression: the `context` value is signed AND transmitted verbatim.
+
+    A prior bug pre-wrapped it into a `{"context": ...}` dict, so canonicalisation
+    produced `context=context=product|entity_id=...` (the param name added a
+    SECOND `context=`), which Cloudinary rejected as 401 Invalid Signature.
+    """
+    client = CloudinaryClient(_fake_settings("my-test-secret"))
+    env = client.build_signed_envelope(
+        folder="prod/products/abc",
+        eager=["c_fill,w_320,h_400"],
+        allowed_formats=["jpg", "webp"],
+        max_file_size=10_000_000,
+        timestamp=1700000000,
+        tags=["ctx:product"],
+        context="product|entity_id=abc",
+    )
+    # Envelope returns the value unchanged (frontend POSTs it verbatim).
+    assert env.context == "product|entity_id=abc"
+
+    # The frontend submits the same context value as-is.
+    submitted = {
+        "timestamp": 1700000000,
+        "folder": "prod/products/abc",
+        "eager": ["c_fill,w_320,h_400"],
+        "allowed_formats": ["jpg", "webp"],
+        "max_file_size": 10_000_000,
+        "tags": ["ctx:product"],
+        "context": "product|entity_id=abc",
+    }
+    assert sign_params(submitted, "my-test-secret") == env.signature
+
+    # Canonical contains `context=` exactly once — no double prefix.
+    canonical = _canonicalize(submitted)
+    assert "context=product|entity_id=abc" in canonical
+    assert "context=context=" not in canonical
+
+
 # ---------- Delivery URL builder ----------
 
 

@@ -119,7 +119,10 @@ class SignedUploadEnvelope:
     resource_type: str
     public_id: str | None  # optional pre-assigned ID (e.g. for deterministic asset names)
     tags: list[str]
-    context: dict[str, str]
+    # Pre-formed Cloudinary contextual-metadata value (`key=value|key=value`).
+    # Signed and transmitted verbatim — the caller owns the exact string so the
+    # signed value and the value the frontend POSTs are byte-identical.
+    context: str
 
 
 class CloudinaryClient:
@@ -153,7 +156,7 @@ class CloudinaryClient:
         resource_type: str = "image",
         public_id: str | None = None,
         tags: list[str] | None = None,
-        context: dict[str, str] | None = None,
+        context: str | None = None,
         timestamp: int | None = None,
     ) -> SignedUploadEnvelope:
         """Produce a signed payload the frontend hands to Cloudinary.
@@ -161,10 +164,15 @@ class CloudinaryClient:
         All constraints (`max_file_size`, `allowed_formats`, `folder`, `eager`)
         are part of the signature — Cloudinary refuses an upload that changes
         any of them.
+
+        `context` is a pre-formed Cloudinary contextual-metadata value
+        (`key=value|key=value`). It is signed and returned VERBATIM — the param
+        name `context` is added by canonicalisation, so the value must NOT be
+        re-wrapped with another `context=` prefix.
         """
         ts = timestamp or int(time.time())
         tags = tags or []
-        context = context or {}
+        context = context or ""
 
         # Build the param dict in the EXACT shape the frontend will submit.
         # Cloudinary's signature comparison is byte-exact against the
@@ -180,8 +188,9 @@ class CloudinaryClient:
         if public_id:
             params["public_id"] = public_id
         if context:
-            # Cloudinary `context` is `key1=val1|key2=val2`
-            params["context"] = "|".join(f"{k}={v}" for k, v in context.items())
+            # Sign the value as-is; canonicalisation prepends the `context=`
+            # param name (→ `context=key=value|...`).
+            params["context"] = context
 
         signature = sign_params(params, self._api_secret)
 
