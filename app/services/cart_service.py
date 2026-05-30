@@ -283,14 +283,14 @@ class CartService(BaseService):
             and variant.is_active
             and available_stock >= item.quantity
         )
-        variant_label_parts = [p for p in (variant.color, variant.fabric) if p]
+        variant_label_parts = [p for p in (variant.color, variant.fabric, variant.size) if p]
         return CartItemRead(
             id=item.id,
             variant_id=variant.id,
             product_id=product.id,
             product_slug=product.slug,
             product_name=product.name,
-            variant_label=" · ".join(variant_label_parts) if variant_label_parts else None,
+            variant_label=" · ".join(variant_label_parts) if variant_label_parts else variant.sku,
             image_url=image_url,
             unit_price=unit_price,
             quantity=item.quantity,

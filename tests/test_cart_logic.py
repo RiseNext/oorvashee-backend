@@ -31,6 +31,7 @@ def _variant(*, stock: int, reserved: int = 0, price: Decimal = Decimal("100")):
         is_active=True,
         color="Red",
         fabric="Silk",
+        size=None,
         price_override=None,
         product=product,
         inventory=inv,
