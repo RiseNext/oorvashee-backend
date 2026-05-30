@@ -128,6 +128,7 @@ class CatalogService(BaseService):
             id=product.id,
             slug=product.slug,
             name=product.name,
+            code=product.code,
             description=product.description,
             short_description=product.short_description,
             base_price=product.base_price,
