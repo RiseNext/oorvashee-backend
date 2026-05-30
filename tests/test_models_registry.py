@@ -20,6 +20,7 @@ EXPECTED_TABLES = {
     "order_items",
     "orders",
     "payments",
+    "policies",
     "product_categories",
     "product_images",
     "product_variants",

@@ -27,6 +27,7 @@ from app.models.inventory import Inventory, StockMovement
 from app.models.notification import Notification
 from app.models.order import Order, OrderItem
 from app.models.payment import Payment, Shipment
+from app.models.policy import Policy
 from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.product_variant import ProductVariant
@@ -53,6 +54,7 @@ __all__ = [
     "Order",
     "OrderItem",
     "Payment",
+    "Policy",
     "Product",
     "ProductCategory",
     "ProductImage",
