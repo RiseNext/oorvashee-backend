@@ -193,6 +193,7 @@ class AdminProductService(BaseService):
         product = Product(
             slug=slug,
             name=body.name.strip(),
+            code=body.code,
             short_description=body.short_description,
             description=body.description,
             base_price=body.base_price,
@@ -728,6 +729,7 @@ class AdminProductService(BaseService):
         """Serialisable snapshot for audit-log diffs."""
         return {
             "name": product.name,
+            "code": product.code,
             "short_description": product.short_description,
             "description": product.description,
             "base_price": _to_str(product.base_price),
@@ -819,6 +821,7 @@ class AdminProductService(BaseService):
             id=product.id,
             slug=product.slug,
             name=product.name,
+            code=product.code,
             short_description=product.short_description,
             description=product.description,
             base_price=product.base_price,

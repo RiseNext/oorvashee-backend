@@ -125,6 +125,12 @@ class AdminProductCreate(BaseModel):
         description="Optional override. Lowercase letters, digits, hyphens. "
         "Auto-generated from name if omitted.",
     )
+    code: str | None = Field(
+        default=None,
+        max_length=80,
+        description="Admin-managed product code shown on the storefront PDP "
+        "(distinct from variant SKUs). Optional.",
+    )
     short_description: str | None = Field(default=None, max_length=500)
     description: str | None = None
     base_price: Decimal = Field(gt=Decimal("0"), le=Decimal("9999999.99"))
@@ -169,6 +175,7 @@ class AdminProductUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str | None = Field(default=None, min_length=2, max_length=255)
+    code: str | None = Field(default=None, max_length=80)
     short_description: str | None = Field(default=None, max_length=500)
     description: str | None = None
     base_price: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999.99"))
@@ -216,6 +223,7 @@ class AdminProductRead(BaseModel):
     id: uuid.UUID
     slug: str
     name: str
+    code: str | None
     short_description: str | None
     description: str | None
     base_price: Decimal

@@ -72,6 +72,9 @@ class ProductRead(BaseModel):
     id: uuid.UUID
     slug: str
     name: str
+    # Admin-managed product code (≠ variant SKU). Optional; storefront PDP hides
+    # the row when null. Persisted on `products.code`.
+    code: str | None = None
     description: str | None
     short_description: str | None
     base_price: Decimal

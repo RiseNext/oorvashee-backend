@@ -56,6 +56,10 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, AuditableMixin, Base):
 
     slug: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Admin-managed product code shown on the storefront PDP (e.g. "OOR-SAR-001").
+    # Separate from variant `sku` — surfaced as the public product identifier so
+    # variant SKUs never leak into customer-facing UI.
+    code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
