@@ -51,10 +51,17 @@ class ProductRepository(BaseRepository[Product]):
     ) -> tuple[Sequence[Product], int]:
         stmt = self.base_catalog_query()
 
-        # Text search via the generated TSVECTOR column.
+        # Text search: full-text on the generated TSVECTOR (name / short / long
+        # description / tags) OR a case-insensitive substring match on the
+        # admin-managed product code (e.g. "SKS2-1950"). `code` is NOT part of
+        # `search_vector`, and hyphenated alphanumeric codes don't tokenise
+        # reliably under FTS, so ILIKE covers full + partial + case-insensitive
+        # code lookups. Mirrors the slug-ILIKE pattern in `admin_list_query`.
+        # `code` is nullable → a NULL row yields NULL (non-match), never an error.
         if q:
             stmt = stmt.where(
                 Product.search_vector.op("@@")(func.plainto_tsquery("english", q))
+                | Product.code.ilike(f"%{q}%")
             )
 
         # Categories: join through the junction; multi-category = OR semantics.
