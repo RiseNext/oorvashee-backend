@@ -74,6 +74,7 @@ from app.services.inventory_service import (
     InventoryService,
     StockRequirement,
 )
+from app.services.reservation_lifecycle import ReservationLifecycleService
 
 log = get_logger(__name__)
 
@@ -334,19 +335,32 @@ class AdminOrderService(BaseService):
                 code="cannot_cancel_delivered",
             )
 
-        # Restock — drop the inventory back. Uses the same locking
-        # primitive checkout uses, so a racing reservation can't interleave.
+        # D4: physical stock left ONLY if it was actually decremented — at
+        # capture (PAID) for online orders, or at order creation for COD. A
+        # PENDING/FAILED reservation order never decremented stock, so
+        # restocking it would inflate inventory and enable oversell. Restock
+        # only when warranted; otherwise just release any live reservation.
+        # Uses the same locking primitive checkout uses, so a racing
+        # reservation can't interleave.
+        stock_was_decremented = (
+            order.payment_status is PaymentStatus.PAID
+            or order.payment_method is PaymentMethod.COD
+        )
         restock_requirements = [
             StockRequirement(variant_id=item.variant_id, quantity=item.quantity)
             for item in order.items
         ]
-        if restock_requirements:
+        if stock_was_decremented and restock_requirements:
             await self.inventory.restock(
                 restock_requirements,
                 order_id=order.id,
                 actor_user_id=actor_user_id,
                 reason=StockMovementReason.ORDER_CANCELLED,
             )
+        elif order.checkout_session_id is not None:
+            # New-flow order whose stock was never committed — release the
+            # still-active reservation/session instead of restocking.
+            await ReservationLifecycleService(self.session).cancel_for_order(order)
 
         before = order.status
         before_payment = order.payment_status

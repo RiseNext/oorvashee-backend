@@ -38,6 +38,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import OrderStatus, PaymentMethod, PaymentStatus, pg_enum
 
 if TYPE_CHECKING:
+    from app.models.checkout_session import CheckoutSession
     from app.models.coupon import Coupon
     from app.models.payment import Payment, Shipment
     from app.models.product import Product
@@ -97,6 +98,14 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
     )
 
+    # Links the PENDING order to the checkout_session that produced it
+    # ("keep order-at-checkout" decision). Nullable: pre-redesign orders + COD.
+    checkout_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("checkout_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Frozen address snapshot — survives even if the user deletes their address book.
     shipping_address: Mapped[dict] = mapped_column(JSONB, nullable=False)
     billing_address: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -125,6 +134,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # --- Relationships ---
     user: Mapped[User | None] = relationship(back_populates="orders")
     coupon: Mapped[Coupon | None] = relationship()
+    checkout_session: Mapped[CheckoutSession | None] = relationship()
     items: Mapped[list[OrderItem]] = relationship(
         back_populates="order",
         cascade="all, delete-orphan",
@@ -153,6 +163,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_orders_payment_status", "payment_status"),
         Index("ix_orders_email", "email"),
         Index("ix_orders_created", "created_at"),
+        Index("ix_orders_checkout_session_id", "checkout_session_id"),
     )
 
 

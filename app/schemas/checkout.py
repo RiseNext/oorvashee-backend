@@ -9,6 +9,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.enums import (
+    CheckoutSessionStatus,
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
@@ -68,6 +69,52 @@ class CheckoutQuoteRead(BaseModel):
     total: Decimal
     currency: str = "INR"
     has_unavailable_items: bool
+
+
+# ---------- Checkout reservation (POST /checkout) ----------
+
+
+class CheckoutLineResult(BaseModel):
+    """Per-line outcome of an atomic cart-level reservation."""
+
+    variant_id: uuid.UUID
+    product_name: str
+    variant_label: str | None
+    requested: int
+    # Units available to THIS user at reservation time (stock - other active
+    # reservations). On success this is >= requested.
+    available: int
+    # True when this line was (or remains) reserved by this session.
+    reserved: bool
+    # Populated on failure: 'out_of_stock' | 'unavailable'.
+    reason: str | None = None
+
+
+class CheckoutSessionRead(BaseModel):
+    """Result of POST /checkout — the active reservation for the user's cart."""
+
+    session_id: uuid.UUID
+    status: CheckoutSessionStatus
+    expires_at: datetime
+    expires_in_seconds: int
+    lines: list[CheckoutLineResult]
+
+
+# ---------- Start payment for a reserved session (POST /checkout/{id}/pay) ----------
+
+
+class StartPaymentRequest(BaseModel):
+    """Body for POST /checkout/{session_id}/pay.
+
+    Line items come from the session's existing reservations (server cart),
+    NOT from the client. The client supplies only the customer + addresses
+    collected on the checkout page.
+    """
+
+    customer: CheckoutCustomer
+    shipping_address: CheckoutAddress
+    billing_address: CheckoutAddress | None = None
+    notes: str | None = Field(default=None, max_length=1000)
 
 
 # ---------- Place order ----------

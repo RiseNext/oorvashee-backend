@@ -27,6 +27,7 @@ from app.models.cart import Cart, CartItem
 from app.models.enums import ProductStatus
 from app.models.product_variant import ProductVariant
 from app.repositories.cart_repo import CartRepository
+from app.repositories.reservation_repo import ReservationRepository
 from app.schemas.cart import (
     CartItemRead,
     CartRead,
@@ -44,6 +45,23 @@ class CartService(BaseService):
     def repo(self) -> CartRepository:
         return CartRepository(self.session)
 
+    @property
+    def reservations(self) -> ReservationRepository:
+        return ReservationRepository(self.session)
+
+    async def _reserved_map(
+        self, user_id: uuid.UUID, variant_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """DERIVED reserved (active reservations) per variant, EXCLUDING this
+        user's own live checkout session so their own hold never counts against
+        their cart. The deprecated stored inventory.reserved is not consulted."""
+        if not variant_ids:
+            return {}
+        sess = await self.reservations.get_active_session_for_user(user_id)
+        return await self.reservations.active_reserved_for_variants(
+            variant_ids, exclude_session_id=sess.id if sess else None
+        )
+
     # ---------- Read ----------
 
     async def get_cart(self, user_id: uuid.UUID) -> CartRead:
@@ -51,7 +69,7 @@ class CartService(BaseService):
         if cart is None:
             return _empty_cart()
         items = await self.repo.list_items_hydrated(cart.id)
-        return self._serialize(cart, items)
+        return await self._serialize(cart, items, user_id=user_id)
 
     # ---------- Write ----------
 
@@ -65,7 +83,7 @@ class CartService(BaseService):
         existing = await self.repo.get_item_by_variant(cart.id, variant_id)
         target_qty = (existing.quantity if existing else 0) + quantity
 
-        self._guard_stock(variant, target_qty)
+        await self._guard_stock(user_id, variant, target_qty)
 
         if existing is None:
             await self._guard_cart_capacity(cart.id)
@@ -84,7 +102,7 @@ class CartService(BaseService):
             quantity=quantity,
             new_line_quantity=target_qty,
         )
-        return self._serialize(cart, items)
+        return await self._serialize(cart, items, user_id=user_id)
 
     async def update_item(
         self, user_id: uuid.UUID, item_id: uuid.UUID, quantity: int
@@ -103,7 +121,7 @@ class CartService(BaseService):
             raise ProductUnavailableError(
                 "This item is no longer available for purchase"
             )
-        self._guard_stock(item.variant, quantity)
+        await self._guard_stock(user_id, item.variant, quantity)
 
         item.quantity = quantity
         await self.session.flush()
@@ -115,7 +133,7 @@ class CartService(BaseService):
             item_id=str(item_id),
             quantity=quantity,
         )
-        return self._serialize(cart, items)
+        return await self._serialize(cart, items, user_id=user_id)
 
     async def remove_item(
         self, user_id: uuid.UUID, item_id: uuid.UUID
@@ -132,7 +150,7 @@ class CartService(BaseService):
         self.log.info(
             "cart_item_removed", user_id=str(user_id), item_id=str(item_id)
         )
-        return self._serialize(cart, items)
+        return await self._serialize(cart, items, user_id=user_id)
 
     async def clear(self, user_id: uuid.UUID) -> CartRead:
         cart = await self.repo.get_for_user(user_id)
@@ -140,7 +158,7 @@ class CartService(BaseService):
             return _empty_cart()
         await self.repo.clear(cart.id)
         self.log.info("cart_cleared", user_id=str(user_id))
-        return self._serialize(cart, [])
+        return await self._serialize(cart, [], user_id=user_id)
 
     async def merge(
         self, user_id: uuid.UUID, lines: list[MergeCartLine]
@@ -174,8 +192,11 @@ class CartService(BaseService):
 
             existing = await self.repo.get_item_by_variant(cart.id, variant_id)
             target_qty = (existing.quantity if existing else 0) + qty
-            # Cap silently at available stock — merge should never fail noisily.
-            available = self._available_stock(variant)
+            # Cap silently at DERIVED available — merge should never fail noisily.
+            reserved = (await self._reserved_map(user_id, [variant_id])).get(
+                variant_id, 0
+            )
+            available = self._available(variant, reserved)
             target_qty = min(target_qty, available, 99)
             if target_qty == 0:
                 continue
@@ -193,7 +214,7 @@ class CartService(BaseService):
         self.log.info(
             "cart_merged", user_id=str(user_id), incoming_lines=len(lines)
         )
-        return self._serialize(cart, items)
+        return await self._serialize(cart, items, user_id=user_id)
 
     # ---------- Internal: validation ----------
 
@@ -217,15 +238,20 @@ class CartService(BaseService):
         return variant
 
     @staticmethod
-    def _available_stock(variant: ProductVariant) -> int:
+    def _available(variant: ProductVariant, reserved: int) -> int:
+        """available = stock_on_hand - DERIVED active reservations (Model A)."""
         inv = variant.inventory
         if inv is None:
             return 0
-        return max(inv.stock - inv.reserved, 0)
+        return max(inv.stock - reserved, 0)
 
-    @classmethod
-    def _guard_stock(cls, variant: ProductVariant, requested_qty: int) -> None:
-        available = cls._available_stock(variant)
+    async def _guard_stock(
+        self, user_id: uuid.UUID, variant: ProductVariant, requested_qty: int
+    ) -> None:
+        reserved = (await self._reserved_map(user_id, [variant.id])).get(
+            variant.id, 0
+        )
+        available = self._available(variant, reserved)
         if requested_qty > available:
             raise OutOfStockError(
                 f"Only {available} unit(s) available",
@@ -248,9 +274,14 @@ class CartService(BaseService):
 
     # ---------- Internal: serialization ----------
 
-    @classmethod
-    def _serialize(cls, cart: Cart, items) -> CartRead:  # type: ignore[no-untyped-def]
-        rows = [cls._serialize_item(it) for it in items]
+    async def _serialize(self, cart: Cart, items, *, user_id: uuid.UUID) -> CartRead:  # type: ignore[no-untyped-def]
+        reserved_map = await self._reserved_map(
+            user_id, [it.variant_id for it in items]
+        )
+        rows = [
+            self._serialize_item(it, reserved_map.get(it.variant_id, 0))
+            for it in items
+        ]
         subtotal = sum((r.line_total for r in rows), Decimal("0"))
         item_count = sum(r.quantity for r in rows)
         has_unavailable = any(not r.available for r in rows)
@@ -265,7 +296,7 @@ class CartService(BaseService):
         )
 
     @classmethod
-    def _serialize_item(cls, item: CartItem) -> CartItemRead:
+    def _serialize_item(cls, item: CartItem, reserved: int) -> CartItemRead:
         variant = item.variant
         product = variant.product
         unit_price = variant.price_override or product.base_price
@@ -277,7 +308,7 @@ class CartService(BaseService):
         if image_url is None and product.images:
             image_url = product.images[0].url
 
-        available_stock = cls._available_stock(variant)
+        available_stock = cls._available(variant, reserved)
         available = (
             product.status == ProductStatus.PUBLISHED
             and variant.is_active

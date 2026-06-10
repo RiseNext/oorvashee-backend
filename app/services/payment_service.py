@@ -34,6 +34,7 @@ from app.core.exceptions import (
     AuthenticationError,
     IntegrationError,
     NotFoundError,
+    OutOfStockError,
     PaymentFailedError,
 )
 from app.core.logging import get_logger
@@ -50,6 +51,7 @@ from app.services.audit_service import AuditService
 from app.services.base import BaseService
 from app.services.checkout_service import CheckoutService
 from app.services.inventory_service import InventoryService, StockRequirement
+from app.services.reservation_lifecycle import ReservationLifecycleService
 
 log = get_logger(__name__)
 
@@ -66,6 +68,10 @@ class PaymentService(BaseService):
     @property
     def inventory(self) -> InventoryService:
         return InventoryService(self.session)
+
+    @property
+    def lifecycle(self) -> ReservationLifecycleService:
+        return ReservationLifecycleService(self.session)
 
     @property
     def audit(self) -> AuditService:
@@ -103,15 +109,32 @@ class PaymentService(BaseService):
         if payment is None:
             raise NotFoundError("Payment record not found for this Razorpay order")
 
+        order = await self.orders.get_by_number(order_number)
+        if order is None:
+            raise NotFoundError("Order not found")
+
+        # Reservation redesign: the WEBHOOK is the SOLE source of truth for
+        # inventory mutation + order completion. For reservation-backed orders
+        # the frontend verify call is informational only — it confirms the
+        # signature is valid and returns the current order status; the client
+        # then polls until the webhook lands. Verify NEVER decrements stock or
+        # completes the reservation here. (This also removes the verify-vs-
+        # webhook double-capture race for the new flow.)
+        if order.checkout_session_id is not None:
+            log.info(
+                "razorpay_verify_webhook_authoritative",
+                order_number=order_number,
+                payment_status=order.payment_status.value,
+            )
+            return order
+
+        # --- Legacy (non-reservation) flow: verify may capture for instant UX ---
         if payment.status == RazorpayPaymentStatus.CAPTURED:
             # Verify can be called multiple times; replay the existing state.
             log.info(
                 "razorpay_verify_already_captured",
                 razorpay_payment_id=razorpay_payment_id,
             )
-            order = await self.orders.get_by_number(order_number)
-            if order is None:
-                raise NotFoundError("Order not found")
             return order
 
         return await self._capture(
@@ -161,15 +184,30 @@ class PaymentService(BaseService):
                 await self.session.flush()
                 return {"status": "already_captured"}
 
-            await self._capture(
-                payment=payment,
-                razorpay_payment_id=razorpay_payment_id,
-                razorpay_signature=None,
-                source="webhook",
-                actor_request_id=None,
-                webhook_event_id=event_id,
-                raw_response=payload,
-            )
+            try:
+                await self._capture(
+                    payment=payment,
+                    razorpay_payment_id=razorpay_payment_id,
+                    razorpay_signature=None,
+                    source="webhook",
+                    actor_request_id=None,
+                    webhook_event_id=event_id,
+                    raw_response=payload,
+                )
+            except OutOfStockError:
+                # Late capture for a unit already resold (e.g. the 15-min
+                # backstop cancelled this session and another customer bought
+                # the freed unit). The money WAS captured at Razorpay but we
+                # cannot fulfil. Record the capture + flag for a manual refund,
+                # persist the event_id so retries dedup, and return 200 so
+                # Razorpay stops hammering the webhook.
+                await self._record_capture_unfulfillable(
+                    payment=payment,
+                    razorpay_payment_id=razorpay_payment_id,
+                    webhook_event_id=event_id,
+                    raw_response=payload,
+                )
+                return {"status": "captured_needs_refund"}
             return {"status": "captured"}
 
         if event_type == "payment.failed":
@@ -219,13 +257,20 @@ class PaymentService(BaseService):
         order = await self._load_order_with_items(payment.order_id)
 
         async with self.session.begin_nested():
-            requirements = [
-                StockRequirement(variant_id=it.variant_id, quantity=it.quantity)
-                for it in order.items
-            ]
-            await self.inventory.consume_reservation(
-                requirements, order_id=order.id
-            )
+            if order.checkout_session_id is not None:
+                # Reservation redesign: confirmed sale decrements stock_on_hand
+                # + bumps sold_quantity, and flips session + reservations to
+                # COMPLETED. (Physical stock leaves ONLY here.)
+                await self.lifecycle.complete_sale(order)
+            else:
+                # Legacy order: consume the stored inventory.reserved counter.
+                requirements = [
+                    StockRequirement(variant_id=it.variant_id, quantity=it.quantity)
+                    for it in order.items
+                ]
+                await self.inventory.consume_reservation(
+                    requirements, order_id=order.id
+                )
 
             payment.razorpay_payment_id = razorpay_payment_id
             if razorpay_signature:
@@ -282,19 +327,39 @@ class PaymentService(BaseService):
         raw_response: dict[str, Any] | None,
     ) -> None:
         order = await self._load_order_with_items(payment.order_id)
-        async with self.session.begin_nested():
-            # Release the reservation so stock isn't permanently held.
-            requirements = [
-                StockRequirement(variant_id=it.variant_id, quantity=it.quantity)
-                for it in order.items
-            ]
-            from app.models.enums import StockMovementReason
-
-            await self.inventory.release_reservation(
-                requirements,
-                order_id=order.id,
-                reason=StockMovementReason.ORDER_CANCELLED,
+        # D5: a payment.failed arriving AFTER a successful capture (a different
+        # event id, so the webhook_event_id dedup misses) must NOT regress a
+        # PAID order to FAILED or cancel a fulfilled reservation while the
+        # customer stays charged. Treat a post-capture failure as a
+        # refund/chargeback signal, not a status flip — ignore it here.
+        if (
+            payment.status == RazorpayPaymentStatus.CAPTURED
+            or order.payment_status == PaymentStatus.PAID
+        ):
+            log.warning(
+                "razorpay_failed_after_capture_ignored",
+                order_number=order.order_number,
+                event_id=event_id,
             )
+            return
+        async with self.session.begin_nested():
+            if order.checkout_session_id is not None:
+                # Reservation redesign: cancel session + reservations. NO stock
+                # change (stock was never decremented — only happens on capture).
+                await self.lifecycle.cancel_for_order(order)
+            else:
+                # Legacy order: release the stored inventory.reserved hold.
+                requirements = [
+                    StockRequirement(variant_id=it.variant_id, quantity=it.quantity)
+                    for it in order.items
+                ]
+                from app.models.enums import StockMovementReason
+
+                await self.inventory.release_reservation(
+                    requirements,
+                    order_id=order.id,
+                    reason=StockMovementReason.ORDER_CANCELLED,
+                )
 
             payment.status = RazorpayPaymentStatus.FAILED
             payment.failure_reason = reason
@@ -313,6 +378,56 @@ class PaymentService(BaseService):
             )
         await self.session.flush()
         log.info("payment_failed", order_number=order.order_number, reason=reason)
+
+    async def _record_capture_unfulfillable(
+        self,
+        *,
+        payment: Payment,
+        razorpay_payment_id: str,
+        webhook_event_id: str | None,
+        raw_response: dict[str, Any] | None,
+    ) -> None:
+        """Money captured at Razorpay but stock unavailable (late capture).
+
+        Records the capture + a manual-refund flag WITHOUT marking the order
+        PAID, and persists webhook_event_id so Razorpay's retries dedup. Runs
+        after _capture's savepoint already rolled back, inside the still-open
+        request transaction.
+        """
+        order = await self._load_order_with_items(payment.order_id)
+        try:
+            async with self.session.begin_nested():
+                payment.razorpay_payment_id = razorpay_payment_id
+                payment.status = RazorpayPaymentStatus.CAPTURED
+                payment.captured_at = datetime.now(UTC)
+                if webhook_event_id:
+                    payment.webhook_event_id = webhook_event_id
+                payment.failure_reason = "captured_out_of_stock_needs_refund"
+                if raw_response:
+                    payment.raw_response = raw_response
+                await self.audit.record(
+                    action=AuditAction.PAYMENT_CAPTURED,
+                    entity_type="order",
+                    entity_id=order.id,
+                    summary=(
+                        "Payment captured but stock unavailable at capture — "
+                        "MANUAL REFUND REQUIRED"
+                    ),
+                    metadata={
+                        "razorpay_payment_id": razorpay_payment_id,
+                        "needs_refund": True,
+                        "reason": "out_of_stock_at_capture",
+                    },
+                )
+            await self.session.flush()
+        except IntegrityError:
+            # A concurrent retry already recorded this event — safe to ignore.
+            await self.session.rollback()
+        log.warning(
+            "payment_captured_unfulfillable_needs_refund",
+            order_number=order.order_number,
+            razorpay_payment_id=razorpay_payment_id,
+        )
 
     # ------------------------------------------------------------------
     # Convenience for routers

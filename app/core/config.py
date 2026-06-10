@@ -93,6 +93,26 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = "replace_me"
     razorpay_webhook_secret: str = "replace_me"
 
+    # --- Checkout reservations ---
+    # When an authed user reaches the checkout page, their cart is reserved
+    # for this long (RESERVED). The expiry cron releases RESERVED rows past
+    # their expires_at; availability reads also exclude expired rows lazily.
+    reservation_ttl_seconds: int = 180  # 3 minutes
+    # Backstop window once the user clicks Pay (RESERVED -> PAYMENT_PROCESSING).
+    # The cron must NEVER expire a PAYMENT_PROCESSING row before this elapses.
+    reservation_payment_ttl_seconds: int = 900  # 15 minutes
+    # How often the in-process expiry sweep runs (Phase 4 cron).
+    reservation_sweep_interval_seconds: int = 10
+    # Whether the lifespan starts the in-process expiry sweeper. Disable in
+    # tests / when an external scheduler owns expiry. A Postgres advisory lock
+    # keeps it single-runner across gunicorn workers regardless.
+    reservation_sweeper_enabled: bool = True
+    # The deprecated order-at-checkout endpoint (POST /checkout/orders). OFF by
+    # default: it uses the stored inventory.reserved ledger, which is invisible
+    # to the new derived-reservation flow and can oversell. Re-enable only as a
+    # temporary rollback to the pre-redesign flow.
+    legacy_checkout_enabled: bool = False
+
     # --- Cloudinary ---
     cloudinary_cloud_name: str = "oorvashee"
     cloudinary_api_key: str = "replace_me"

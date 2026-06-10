@@ -58,6 +58,12 @@ class Inventory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     low_stock_threshold: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="2"
     )
+    # Cumulative units sold, forward-only; incremented on confirmed payment.
+    # ANALYTICS/admin "Sold" column ONLY — NOT part of availability math
+    # (available = stock - active reservations; see reservation.py).
+    sold_quantity: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
 
     variant: Mapped[ProductVariant] = relationship(back_populates="inventory")
 
@@ -65,6 +71,7 @@ class Inventory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("stock >= 0", name="stock_non_negative"),
         CheckConstraint("reserved >= 0", name="reserved_non_negative"),
         CheckConstraint("reserved <= stock", name="reserved_le_stock"),
+        CheckConstraint("sold_quantity >= 0", name="sold_quantity_non_negative"),
         Index("ix_inventory_low_stock", "stock", "low_stock_threshold"),
     )
 

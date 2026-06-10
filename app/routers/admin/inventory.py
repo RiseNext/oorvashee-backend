@@ -25,13 +25,14 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from app.core.pagination import OffsetParams, Page, offset_params
 from app.core.security import get_current_user, require_role
 from app.db.deps import DbSession
-from app.models.enums import StockMovementReason
+from app.models.enums import ReservationStatus, StockMovementReason
 from app.models.user import User
 from app.schemas.admin_inventory import (
     InventoryDetail,
     InventoryHealthSummary,
     InventoryListItem,
     MovementItem,
+    ReservationAdminItem,
     StockAdjustmentRequest,
     StockAdjustmentResult,
     ThresholdUpdateRequest,
@@ -104,6 +105,30 @@ async def list_movements(
         order_id=order_id,
         since=since,
         until=until,
+    )
+
+
+@router.get(
+    "/reservations",
+    response_model=Page[ReservationAdminItem],
+    summary="Reservation lists (Active/Expired/Completed/Cancelled), paginated",
+)
+async def list_reservations(
+    session: DbSession,
+    params: Annotated[OffsetParams, Depends(offset_params)],
+    variant_id: Annotated[uuid.UUID | None, Query()] = None,
+    status: Annotated[list[ReservationStatus] | None, Query()] = None,
+    session_id: Annotated[uuid.UUID | None, Query()] = None,
+    user_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> Page[ReservationAdminItem]:
+    """Filter by `status` to render each tab: Active = reserved + payment_processing,
+    Expired = expired, Completed = completed, Cancelled = cancelled."""
+    return await AdminInventoryService(session).list_reservations(
+        params=params,
+        variant_id=variant_id,
+        statuses=status,
+        session_id=session_id,
+        user_id=user_id,
     )
 
 

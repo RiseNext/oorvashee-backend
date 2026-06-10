@@ -163,7 +163,7 @@ class InventoryRepository(BaseRepository[Inventory]):
             select(
                 func.count(Inventory.id),
                 func.coalesce(func.sum(Inventory.stock), 0),
-                func.coalesce(func.sum(Inventory.reserved), 0),
+                func.coalesce(func.sum(Inventory.sold_quantity), 0),
                 func.coalesce(
                     func.sum(cast(Inventory.stock == 0, Integer)),
                     0,
@@ -187,7 +187,7 @@ class InventoryRepository(BaseRepository[Inventory]):
         return {
             "active_variants": int(row[0]),
             "total_stock_units": int(row[1]),
-            "total_reserved_units": int(row[2]),
+            "total_sold_units": int(row[2]),
             "out_of_stock_variants": int(row[3]),
             "low_stock_variants": int(row[4]),
         }

@@ -46,6 +46,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     sessionmaker = build_sessionmaker(engine)
     set_db_state(engine, sessionmaker)
 
+    # In-process reservation expiry cron (single-runner via Postgres advisory
+    # lock — safe under multiple gunicorn workers). See app/tasks.
+    sweeper = None
+    if settings.reservation_sweeper_enabled:
+        from app.tasks.reservation_sweeper import ReservationSweeper
+
+        sweeper = ReservationSweeper(
+            sessionmaker,
+            interval=settings.reservation_sweep_interval_seconds,
+        )
+        sweeper.start()
+
     # `sentry_enabled` reflects what the Sentry init actually decided —
     # a non-empty but malformed DSN counts as disabled (see core/sentry.py).
     dsn = (settings.sentry_dsn or "").strip()
@@ -56,10 +68,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         version=settings.app_version,
         rate_limit_enabled=settings.rate_limit_enabled,
         sentry_enabled=sentry_active,
+        reservation_sweeper=settings.reservation_sweeper_enabled,
     )
     try:
         yield
     finally:
+        if sweeper is not None:
+            await sweeper.stop()
         log.info("app_shutdown")
         await dispose_engine()
 

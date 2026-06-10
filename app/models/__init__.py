@@ -21,6 +21,7 @@ from app.models.audit_log import AuditLog
 from app.models.banner import Banner
 from app.models.cart import Cart, CartItem
 from app.models.category import Category, ProductCategory
+from app.models.checkout_session import CheckoutSession
 from app.models.coupon import Coupon
 from app.models.import_job import ImportJob
 from app.models.inventory import Inventory, StockMovement
@@ -32,6 +33,7 @@ from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.product_variant import ProductVariant
 from app.models.request_idempotency import RequestIdempotency
+from app.models.reservation import Reservation
 from app.models.review import Review
 from app.models.role import Role, UserRole
 from app.models.user import User
@@ -47,6 +49,7 @@ __all__ = [
     "Cart",
     "CartItem",
     "Category",
+    "CheckoutSession",
     "Coupon",
     "ImportJob",
     "Inventory",
@@ -60,6 +63,7 @@ __all__ = [
     "ProductImage",
     "ProductVariant",
     "RequestIdempotency",
+    "Reservation",
     "Review",
     "Role",
     "Shipment",

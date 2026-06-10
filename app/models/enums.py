@@ -124,6 +124,36 @@ class StockMovementReason(StrEnum):
     RESTOCK = "restock"
 
 
+class CheckoutSessionStatus(StrEnum):
+    """Lifecycle of a checkout_sessions row.
+
+    ACTIVE -> PAYMENT_PROCESSING -> COMPLETED on success; EXPIRED via the
+    advisory-lock cron when expires_at passes; CANCELLED if the user abandons.
+    ACTIVE and PAYMENT_PROCESSING are the "active" states (one per user).
+    """
+
+    ACTIVE = "active"
+    PAYMENT_PROCESSING = "payment_processing"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class ReservationStatus(StrEnum):
+    """Lifecycle of a reservations row.
+
+    Only RESERVED + PAYMENT_PROCESSING (and expires_at > now()) count toward
+    derived reserved stock. COMPLETED is set on confirmed payment; EXPIRED via
+    cron; CANCELLED on session cancel.
+    """
+
+    RESERVED = "reserved"
+    PAYMENT_PROCESSING = "payment_processing"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
 # ---------------------------------------------------------------------------
 # Engagement / system
 # ---------------------------------------------------------------------------
@@ -214,4 +244,6 @@ PG_ENUMS: list[tuple[type[StrEnum], str]] = [
     (AuditAction, "audit_action"),
     (ImportKind, "import_kind"),
     (ImportStatus, "import_status"),
+    (CheckoutSessionStatus, "checkout_session_status"),
+    (ReservationStatus, "reservation_status"),
 ]

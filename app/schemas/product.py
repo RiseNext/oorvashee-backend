@@ -23,7 +23,19 @@ class VariantSummary(BaseModel):
     fabric: str | None = None
     size: str | None = None
     price: Decimal
-    available: bool
+    available: bool = Field(
+        description="True when available_quantity > 0 (derived, buyable)."
+    )
+    available_quantity: int = Field(
+        default=0,
+        description="DERIVED available = stock_on_hand - active reservations "
+        "(never negative). Drives the storefront availability messaging.",
+    )
+    availability_state: str = Field(
+        default="out_of_stock",
+        description="DB-computed state: in_stock | low | selling_fast | "
+        "last_one | reserved | out_of_stock.",
+    )
     stock: int | None = Field(
         default=None, description="Exposed only when caller has admin role."
     )

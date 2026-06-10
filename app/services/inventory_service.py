@@ -219,6 +219,72 @@ class InventoryService(BaseService):
         log.info("inventory_reservation_consumed", order_id=str(order_id))
 
     # ------------------------------------------------------------------
+    # Confirmed sale (reservation redesign — webhook capture path)
+    # ------------------------------------------------------------------
+
+    async def commit_sale(
+        self,
+        requirements: list[StockRequirement],
+        *,
+        order_id: uuid.UUID,
+    ) -> None:
+        """Confirmed payment: decrement physical stock + increment sold_quantity.
+
+        This is THE only place physical stock leaves in the reservation
+        redesign — driven exclusively by the Razorpay capture webhook. It does
+        NOT touch the deprecated stored `reserved` column (the new flow holds
+        stock via the `reservations` table, not the counter).
+
+        Locks rows FOR UPDATE first (deterministic order). A final stock guard
+        protects against a late capture arriving after the backstop freed the
+        units to someone else — raises OutOfStockError rather than driving
+        stock negative (the DB CHECK would otherwise abort the whole webhook).
+        """
+        locks = await self._lock_inventory_rows([r.variant_id for r in requirements])
+        for req in requirements:
+            inv = locks.get(req.variant_id)
+            if inv is None:
+                raise OutOfStockError(
+                    "Variant has no inventory record at capture time",
+                    extra={"variant_id": str(req.variant_id)},
+                )
+            if inv.stock < req.quantity:
+                raise OutOfStockError(
+                    "Insufficient physical stock to fulfil a confirmed payment",
+                    extra={
+                        "variant_id": str(req.variant_id),
+                        "stock_on_hand": inv.stock,
+                        "requested": req.quantity,
+                    },
+                )
+            inv.stock -= req.quantity
+            inv.sold_quantity += req.quantity
+            # The new flow never writes the deprecated stored `reserved`
+            # counter, but a non-zero LEGACY value could make reserved > stock
+            # after this decrement and violate the reserved<=stock CHECK
+            # (which would 500 the webhook into an infinite retry). Clamp it
+            # down under the same row lock. (No-op for new-flow variants where
+            # reserved is already 0.)
+            if inv.reserved > inv.stock:
+                inv.reserved = inv.stock
+            self.session.add(
+                StockMovement(
+                    variant_id=req.variant_id,
+                    delta=-req.quantity,
+                    reason=StockMovementReason.ORDER_PLACED,
+                    order_id=order_id,
+                    note="sale confirmed on payment capture",
+                )
+            )
+        await self.session.flush()
+        log.info(
+            "inventory_sale_committed",
+            order_id=str(order_id),
+            lines=len(requirements),
+            total_qty=sum(r.quantity for r in requirements),
+        )
+
+    # ------------------------------------------------------------------
     # Direct decrement (COD path)
     # ------------------------------------------------------------------
 

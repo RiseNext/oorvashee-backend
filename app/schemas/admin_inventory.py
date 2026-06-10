@@ -18,7 +18,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.enums import StockMovementReason
+from app.models.enums import ReservationStatus, StockMovementReason
 
 
 class AdjustmentMode(StrEnum):
@@ -119,9 +119,13 @@ class InventoryListItem(BaseModel):
         default=None,
         description="`color / fabric / size` joined for the admin row label.",
     )
-    stock: int
-    reserved: int
-    available: int = Field(description="`stock - reserved` (never negative).")
+    stock: int = Field(description="Physical stock_on_hand (== inventory.stock).")
+    reserved: int = Field(
+        description="DERIVED — SUM of active (RESERVED + PAYMENT_PROCESSING, "
+        "non-expired) reservations for this variant."
+    )
+    available: int = Field(description="`stock - reserved` (Model A, never negative).")
+    sold: int = Field(description="Cumulative units sold (forward-only analytics).")
     low_stock_threshold: int
     is_low_stock: bool
     is_out_of_stock: bool
@@ -147,6 +151,15 @@ class MovementItem(BaseModel):
     created_at: datetime
 
 
+class ReservationCounts(BaseModel):
+    """The four admin reservation buckets for one variant."""
+
+    active: int = Field(description="RESERVED + PAYMENT_PROCESSING.")
+    expired: int
+    completed: int
+    cancelled: int
+
+
 class InventoryDetail(BaseModel):
     """Variant-detail view: current state + recent movements (last 20)."""
 
@@ -161,14 +174,42 @@ class InventoryDetail(BaseModel):
     fabric: str | None
     size: str | None
     stock: int
-    reserved: int
-    available: int
+    reserved: int = Field(description="DERIVED — SUM of active reservations.")
+    available: int = Field(description="`stock - reserved` (Model A).")
+    sold: int = Field(description="Cumulative units sold (forward-only analytics).")
     low_stock_threshold: int
     is_low_stock: bool
     is_out_of_stock: bool
     is_default_variant: bool
     price: Decimal
+    reservation_counts: ReservationCounts
     recent_movements: list[MovementItem]
+
+
+# ---------- Reservation admin list ----------------------------------------
+
+
+class ReservationAdminItem(BaseModel):
+    """One reservation row for the admin Active/Expired/Completed/Cancelled lists."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    checkout_session_id: uuid.UUID
+    variant_id: uuid.UUID
+    sku: str
+    product_name: str
+    user_id: uuid.UUID
+    quantity: int
+    status: ReservationStatus
+    bucket: str = Field(description="active | expired | completed | cancelled.")
+    is_expired: bool = Field(
+        description="True when an active row is already past expires_at but the "
+        "cron hasn't swept it yet."
+    )
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
 
 
 # ---------- Health summary ------------------------------------------------
@@ -181,10 +222,13 @@ class InventoryHealthSummary(BaseModel):
 
     active_variants: int
     total_stock_units: int
-    total_reserved_units: int
+    total_reserved_units: int = Field(
+        description="DERIVED — SUM of all active reservations across active variants."
+    )
     available_units: int = Field(
         description="`total_stock_units - total_reserved_units`."
     )
+    total_sold_units: int = Field(description="Cumulative units sold (analytics).")
     out_of_stock_variants: int
     low_stock_variants: int
     healthy_variants: int = Field(

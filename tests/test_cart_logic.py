@@ -1,4 +1,11 @@
-"""CartService pure logic — no DB."""
+"""CartService pure logic — no DB.
+
+Availability is DERIVED: `_available(variant, reserved)` where `reserved` is the
+SUM of active reservations (passed in by the caller, which queries it). The
+deprecated stored inventory.reserved column is no longer consulted. The
+reservation-aware add guard (`_guard_stock`) is now DB-backed and covered at the
+API level in test_cart_availability.py.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +16,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.exceptions import OutOfStockError, ValidationError
+from app.core.exceptions import ValidationError
 from app.models.enums import ProductStatus
 from app.services.cart_service import CartService, _empty_cart
 
 
-def _variant(*, stock: int, reserved: int = 0, price: Decimal = Decimal("100")):
+def _variant(*, stock: int, price: Decimal = Decimal("100")):
     """Build a fake variant graph good enough for the static helpers."""
-    inv = SimpleNamespace(stock=stock, reserved=reserved)
+    inv = SimpleNamespace(stock=stock)
     product = SimpleNamespace(
         id=uuid.uuid4(),
         slug="x",
@@ -38,20 +45,18 @@ def _variant(*, stock: int, reserved: int = 0, price: Decimal = Decimal("100")):
     )
 
 
-def test_available_stock_subtracts_reserved() -> None:
-    v = _variant(stock=10, reserved=3)
-    assert CartService._available_stock(v) == 7
+def test_available_subtracts_derived_reserved() -> None:
+    assert CartService._available(_variant(stock=10), 3) == 7
 
 
-def test_available_stock_floors_at_zero() -> None:
-    v = _variant(stock=2, reserved=5)  # data corruption guard
-    assert CartService._available_stock(v) == 0
+def test_available_floors_at_zero() -> None:
+    assert CartService._available(_variant(stock=2), 5) == 0  # corruption guard
 
 
-def test_available_stock_no_inventory_row() -> None:
+def test_available_no_inventory_row() -> None:
     v = _variant(stock=0)
     v.inventory = None
-    assert CartService._available_stock(v) == 0
+    assert CartService._available(v, 0) == 0
 
 
 def test_guard_quantity_rejects_zero() -> None:
@@ -64,16 +69,6 @@ def test_guard_quantity_rejects_too_large() -> None:
         CartService._guard_quantity(100)
 
 
-def test_guard_stock_passes_when_within() -> None:
-    CartService._guard_stock(_variant(stock=10), requested_qty=5)
-
-
-def test_guard_stock_raises_out_of_stock() -> None:
-    with pytest.raises(OutOfStockError) as exc_info:
-        CartService._guard_stock(_variant(stock=3, reserved=2), requested_qty=5)
-    assert "1" in exc_info.value.message  # available=1
-
-
 def test_empty_cart_shape() -> None:
     cart = _empty_cart()
     assert cart.items == []
@@ -82,25 +77,26 @@ def test_empty_cart_shape() -> None:
     assert cart.id is None
 
 
-def test_serialize_item_computes_line_total() -> None:
+def test_serialize_item_computes_line_total_and_max() -> None:
     variant = _variant(stock=10, price=Decimal("50.00"))
     item = MagicMock()
     item.id = uuid.uuid4()
     item.variant = variant
     item.quantity = 3
 
-    read = CartService._serialize_item(item)
+    read = CartService._serialize_item(item, 0)  # no active reservations
     assert read.unit_price == Decimal("50.00")
     assert read.line_total == Decimal("150.00")
     assert read.available is True
     assert read.max_quantity == 10
 
 
-def test_serialize_item_marks_unavailable_when_understocked() -> None:
-    variant = _variant(stock=2, price=Decimal("50.00"))
+def test_serialize_item_unavailable_when_derived_reserved_understocks() -> None:
+    variant = _variant(stock=10, price=Decimal("50.00"))
     item = MagicMock()
     item.id = uuid.uuid4()
     item.variant = variant
-    item.quantity = 5  # over available
-    read = CartService._serialize_item(item)
+    item.quantity = 5  # 5 requested, but only 2 available after others' holds
+    read = CartService._serialize_item(item, 8)  # derived reserved = 8
+    assert read.max_quantity == 2
     assert read.available is False

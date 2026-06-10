@@ -32,17 +32,22 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.pagination import OffsetParams, Page, paginate_offset
-from app.models.enums import AuditAction, StockMovementReason
+from app.db.base import utcnow
+from app.models.enums import AuditAction, ReservationStatus, StockMovementReason
 from app.models.inventory import Inventory, StockMovement
 from app.models.product import Product
 from app.models.product_variant import ProductVariant
+from app.models.reservation import Reservation
 from app.repositories.inventory_repo import InventoryRepository
+from app.repositories.reservation_repo import ReservationRepository
 from app.schemas.admin_inventory import (
     AdjustmentMode,
     InventoryDetail,
     InventoryHealthSummary,
     InventoryListItem,
     MovementItem,
+    ReservationAdminItem,
+    ReservationCounts,
     StockAdjustmentRequest,
     StockAdjustmentResult,
     ThresholdUpdateRequest,
@@ -68,6 +73,10 @@ class AdminInventoryService(BaseService):
     @property
     def repo(self) -> InventoryRepository:
         return InventoryRepository(self.session)
+
+    @property
+    def reservations(self) -> ReservationRepository:
+        return ReservationRepository(self.session)
 
     @property
     def inventory(self) -> InventoryService:
@@ -121,13 +130,23 @@ class AdminInventoryService(BaseService):
         stock_before = inv.stock
         target = self._compute_target_stock(body, stock_before)
 
+        # Derived reserved (active reservations) computed under the SAME lock,
+        # so an in-flight reservation can't race an admin "set to N". The
+        # deprecated stored inventory.reserved is a legacy floor the DB CHECK
+        # still enforces — guard against whichever is higher to give a clean
+        # 409 instead of an IntegrityError.
+        derived_reserved = (
+            await self.reservations.active_reserved_for_variants([variant_id])
+        ).get(variant_id, 0)
+        reserved_floor = max(inv.reserved, derived_reserved)
+
         if target < 0:
             raise ConflictError(
                 "Adjustment would push stock below zero",
                 code="adjustment_negative_stock",
                 extra={"current_stock": stock_before, "target_stock": target},
             )
-        if target < inv.reserved:
+        if target < reserved_floor:
             raise ConflictError(
                 "Adjustment would push stock below reserved units; "
                 "release reservations first or cancel pending orders",
@@ -135,7 +154,7 @@ class AdminInventoryService(BaseService):
                 extra={
                     "current_stock": stock_before,
                     "target_stock": target,
-                    "reserved": inv.reserved,
+                    "reserved": reserved_floor,
                 },
             )
 
@@ -174,7 +193,7 @@ class AdminInventoryService(BaseService):
                 sku=variant.sku,
                 stock_before=stock_before,
                 stock_after=stock_before,
-                reserved=inv.reserved,
+                reserved=derived_reserved,
                 delta=0,
                 movement_id=uuid.UUID(int=0),  # sentinel for no-op
                 product_status_after=None,
@@ -209,7 +228,7 @@ class AdminInventoryService(BaseService):
                 "stock_before": stock_before,
                 "stock_after": target,
                 "delta": delta,
-                "reserved": inv.reserved,
+                "reserved": derived_reserved,
                 "reason": body.reason.value,
                 "movement_id": str(movement.id),
             },
@@ -242,7 +261,7 @@ class AdminInventoryService(BaseService):
             sku=variant.sku,
             stock_before=stock_before,
             stock_after=target,
-            reserved=inv.reserved,
+            reserved=derived_reserved,
             delta=delta,
             movement_id=movement.id,
             product_status_after=new_status.value if new_status else None,
@@ -315,8 +334,36 @@ class AdminInventoryService(BaseService):
             out_of_stock_only=out_of_stock_only,
         )
         rows, total = await paginate_offset(self.session, stmt, params)
-        items = [self._to_list_item(inv) for inv in rows]
+        reserved_map = await self.reservations.active_reserved_for_variants(
+            [inv.variant_id for inv in rows]
+        )
+        items = [
+            self._to_list_item(inv, reserved_map.get(inv.variant_id, 0))
+            for inv in rows
+        ]
         return Page[InventoryListItem](items=items, total=total)
+
+    async def list_reservations(
+        self,
+        *,
+        params: OffsetParams,
+        variant_id: uuid.UUID | None,
+        statuses: list[ReservationStatus] | None,
+        session_id: uuid.UUID | None,
+        user_id: uuid.UUID | None,
+    ) -> Page[ReservationAdminItem]:
+        """Admin reservation lists (Active / Expired / Completed / Cancelled).
+        Filter by `statuses` to render each tab."""
+        stmt = self.reservations.admin_list_query(
+            variant_id=variant_id,
+            statuses=statuses,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        rows, total = await paginate_offset(self.session, stmt, params)
+        now = utcnow()
+        items = [self._to_reservation_item(r, now) for r in rows]
+        return Page[ReservationAdminItem](items=items, total=total)
 
     async def get_variant_detail(self, variant_id: uuid.UUID) -> InventoryDetail:
         inv = await self.repo.get_with_variant_and_product(variant_id)
@@ -352,11 +399,15 @@ class AdminInventoryService(BaseService):
         active = agg["active_variants"]
         out = agg["out_of_stock_variants"]
         low = agg["low_stock_variants"]
+        total_stock = agg["total_stock_units"]
+        # Reserved is DERIVED from active reservations (matches checkout).
+        total_reserved = await self.reservations.total_active_reserved()
         return InventoryHealthSummary(
             active_variants=active,
-            total_stock_units=agg["total_stock_units"],
-            total_reserved_units=agg["total_reserved_units"],
-            available_units=agg["total_stock_units"] - agg["total_reserved_units"],
+            total_stock_units=total_stock,
+            total_reserved_units=total_reserved,
+            available_units=max(total_stock - total_reserved, 0),
+            total_sold_units=agg["total_sold_units"],
             out_of_stock_variants=out,
             low_stock_variants=low,
             healthy_variants=max(active - out - low, 0),
@@ -383,7 +434,7 @@ class AdminInventoryService(BaseService):
                 return current - body.value
 
     @staticmethod
-    def _to_list_item(inv: Inventory) -> InventoryListItem:
+    def _to_list_item(inv: Inventory, reserved: int) -> InventoryListItem:
         variant: ProductVariant = inv.variant
         product: Product = variant.product
         price = variant.price_override or product.base_price
@@ -396,13 +447,66 @@ class AdminInventoryService(BaseService):
             product_slug=product.slug,
             variant_label=" / ".join(label_parts) if label_parts else None,
             stock=inv.stock,
-            reserved=inv.reserved,
-            available=max(inv.stock - inv.reserved, 0),
+            reserved=reserved,
+            available=max(inv.stock - reserved, 0),
+            sold=inv.sold_quantity,
             low_stock_threshold=inv.low_stock_threshold,
             is_low_stock=(0 < inv.stock <= inv.low_stock_threshold),
             is_out_of_stock=(inv.stock == 0),
             is_default_variant=variant.is_default,
             price=price,
+        )
+
+    @staticmethod
+    def _bucket(status: ReservationStatus) -> str:
+        if status in (
+            ReservationStatus.RESERVED,
+            ReservationStatus.PAYMENT_PROCESSING,
+        ):
+            return "active"
+        if status is ReservationStatus.EXPIRED:
+            return "expired"
+        if status is ReservationStatus.COMPLETED:
+            return "completed"
+        return "cancelled"
+
+    @staticmethod
+    def _reservation_counts(
+        counts: dict[ReservationStatus, int],
+    ) -> ReservationCounts:
+        return ReservationCounts(
+            active=(
+                counts.get(ReservationStatus.RESERVED, 0)
+                + counts.get(ReservationStatus.PAYMENT_PROCESSING, 0)
+            ),
+            expired=counts.get(ReservationStatus.EXPIRED, 0),
+            completed=counts.get(ReservationStatus.COMPLETED, 0),
+            cancelled=counts.get(ReservationStatus.CANCELLED, 0),
+        )
+
+    @staticmethod
+    def _to_reservation_item(r: Reservation, now: datetime) -> ReservationAdminItem:
+        variant: ProductVariant | None = getattr(r, "variant", None)
+        sku = variant.sku if variant else ""
+        product_name = variant.product.name if variant and variant.product else ""
+        is_active = r.status in (
+            ReservationStatus.RESERVED,
+            ReservationStatus.PAYMENT_PROCESSING,
+        )
+        return ReservationAdminItem(
+            id=r.id,
+            checkout_session_id=r.checkout_session_id,
+            variant_id=r.variant_id,
+            sku=sku,
+            product_name=product_name,
+            user_id=r.user_id,
+            quantity=r.quantity,
+            status=r.status,
+            bucket=AdminInventoryService._bucket(r.status),
+            is_expired=is_active and r.expires_at <= now,
+            expires_at=r.expires_at,
+            created_at=r.created_at,
+            updated_at=r.updated_at,
         )
 
     async def _build_detail(
@@ -413,6 +517,10 @@ class AdminInventoryService(BaseService):
             raise NotFoundError("Parent product not found")
         recent = await self.repo.recent_movements_for_variant(variant.id, limit=20)
         price: Decimal = variant.price_override or product.base_price
+        reserved = (
+            await self.reservations.active_reserved_for_variants([variant.id])
+        ).get(variant.id, 0)
+        counts = await self.reservations.status_counts_for_variant(variant.id)
         return InventoryDetail(
             variant_id=variant.id,
             sku=variant.sku,
@@ -423,13 +531,15 @@ class AdminInventoryService(BaseService):
             fabric=variant.fabric,
             size=variant.size,
             stock=inv.stock,
-            reserved=inv.reserved,
-            available=max(inv.stock - inv.reserved, 0),
+            reserved=reserved,
+            available=max(inv.stock - reserved, 0),
+            sold=inv.sold_quantity,
             low_stock_threshold=inv.low_stock_threshold,
             is_low_stock=(0 < inv.stock <= inv.low_stock_threshold),
             is_out_of_stock=(inv.stock == 0),
             is_default_variant=variant.is_default,
             price=price,
+            reservation_counts=self._reservation_counts(counts),
             recent_movements=[
                 await self._movement_item_with_product(m) for m in recent
             ],

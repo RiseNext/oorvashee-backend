@@ -92,6 +92,20 @@ class ProductUnavailableError(AppError):
     code = "product_unavailable"
 
 
+class ReservationConflictError(AppError):
+    """A cart-level checkout reservation could not be created atomically.
+
+    Raised when one or more lines are no longer available at the moment of the
+    row-locked reservation — stock held by other active reservations, sold, or
+    the product/variant became unavailable. The whole reservation rolls back
+    (no partial holds); `extra["lines"]` carries the per-line breakdown so the
+    frontend can show exactly which item failed. Returns HTTP 409.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "reservation_conflict"
+
+
 class IdempotencyConflictError(AppError):
     """Same Idempotency-Key seen previously on a different route/user/body."""
 
