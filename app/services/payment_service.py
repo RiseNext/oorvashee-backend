@@ -41,6 +41,7 @@ from app.core.logging import get_logger
 from app.integrations.razorpay_client import RazorpayClient
 from app.models.enums import (
     AuditAction,
+    OrderStatus,
     PaymentStatus,
     RazorpayPaymentStatus,
 )
@@ -183,6 +184,22 @@ class PaymentService(BaseService):
                 payment.webhook_event_id = event_id
                 await self.session.flush()
                 return {"status": "already_captured"}
+
+            # Race guard: the user cancelled (Razorpay dismissed) but a capture
+            # arrived anyway. Don't revive a cancelled order — money WAS
+            # captured, so flag it for a manual refund and stop.
+            order = await self._load_order_with_items(payment.order_id)
+            if (
+                order.checkout_session_id is not None
+                and order.status is OrderStatus.CANCELLED
+            ):
+                await self._record_capture_unfulfillable(
+                    payment=payment,
+                    razorpay_payment_id=razorpay_payment_id,
+                    webhook_event_id=event_id,
+                    raw_response=payload,
+                )
+                return {"status": "captured_needs_refund"}
 
             try:
                 await self._capture(

@@ -54,7 +54,17 @@ class OrderRepository(BaseRepository[Order]):
     ) -> tuple[Sequence[Order], int]:
         from sqlalchemy import func
 
-        base = select(Order).where(Order.user_id == user_id)
+        # "My Orders" must stay empty until payment succeeds: a reservation
+        # order is created at /pay with payment_status=PENDING and is only a
+        # real, placed order once captured. Hide PENDING (in-flight/abandoned)
+        # and FAILED (abandoned/cancelled) — PAID / REFUNDED / COD_PENDING
+        # (legit placed orders) are unaffected, so paid history is preserved.
+        base = select(Order).where(
+            Order.user_id == user_id,
+            Order.payment_status.notin_(
+                [PaymentStatus.PENDING, PaymentStatus.FAILED]
+            ),
+        )
         total = int(
             (await self.session.execute(
                 select(func.count()).select_from(base.subquery())

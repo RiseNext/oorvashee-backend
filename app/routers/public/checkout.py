@@ -83,6 +83,28 @@ async def start_payment(
 
 
 @router.post(
+    "/{session_id}/cancel",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Release a checkout reservation (user cancelled / Razorpay dismissed).",
+)
+@profiles.checkout()
+async def cancel_checkout(
+    request: Request,
+    response: Response,
+    session_id: uuid.UUID,
+    session: DbSession,
+    principal: RequiredPrincipal,
+) -> Response:
+    """Authed-only. Cancels the session + its reservations + any unpaid order
+    and frees the held stock immediately. Idempotent."""
+    user = await get_current_user(principal, session)
+    await CheckoutSessionService(session).cancel(
+        session_id=session_id, user_id=user.id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
     "/quote",
     response_model=CheckoutQuoteRead,
     summary="Server-recompute totals + availability for the given line items",

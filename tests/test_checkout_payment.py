@@ -661,3 +661,96 @@ async def test_d4_cancel_restocks_only_when_stock_was_decremented(sm, client):
     assert (await _inv(sm, v2))["stock"] == 1  # decremented on capture
     await _cancel(paid_order)
     assert (await _inv(sm, v2))["stock"] == 3  # restored
+
+
+# ---------------------------------------------------------------------------
+# Production incident fixes: release-on-cancel + My Orders empty until paid
+# ---------------------------------------------------------------------------
+
+
+async def test_cancel_releases_hold_and_cancels_unpaid_order(sm, client):
+    """Razorpay dismissed/failed → POST /checkout/{id}/cancel frees the hold
+    immediately and cancels the unpaid order (no phantom 'placed' order)."""
+    await _reset(sm)
+    async with sm() as s:
+        v = await _make_variant(s, stock=1)
+        clerk = await _make_user_cart(s, variant_id=v, qty=1)
+        await s.commit()
+
+    session_id, order_number, _ = await _reserve_and_pay(client, clerk)
+    assert (await _inv(sm, v))["stock"] == 1  # not decremented (held only)
+
+    c = await client.post(
+        f"{CHECKOUT_URL}/{session_id}/cancel", headers={"X-Test-Clerk-Id": clerk}
+    )
+    assert c.status_code == 204, c.text
+
+    st = await _statuses(sm, order_number=order_number, variant_id=v)
+    assert st["reservation"] == "cancelled"   # hold released → others see available
+    assert st["session"] == "cancelled"
+    assert st["order_status"] == "cancelled"  # unpaid order cancelled
+    assert st["payment_status"] == "failed"
+    assert (await _inv(sm, v))["stock"] == 1  # no stock mutation
+
+
+async def test_capture_after_cancel_flags_needs_refund_not_revived(sm, client):
+    """If a capture lands AFTER the user cancelled, don't revive the order —
+    flag needs_refund, no stock decrement."""
+    await _reset(sm)
+    async with sm() as s:
+        v = await _make_variant(s, stock=1)
+        clerk = await _make_user_cart(s, variant_id=v, qty=1)
+        await s.commit()
+
+    session_id, order_number, rzp = await _reserve_and_pay(client, clerk)
+    await client.post(
+        f"{CHECKOUT_URL}/{session_id}/cancel", headers={"X-Test-Clerk-Id": clerk}
+    )
+
+    r = await _post_webhook(client, _captured_event(rzp, event_id="evt_after_cancel"))
+    assert r.status_code == 200
+    assert r.json()["status"] == "captured_needs_refund"
+
+    assert (await _inv(sm, v))["stock"] == 1  # not decremented
+    st = await _statuses(sm, order_number=order_number, variant_id=v)
+    assert st["order_status"] == "cancelled"  # not revived to placed/paid
+
+
+async def test_my_orders_excludes_unpaid(sm):
+    """My Orders stays empty until payment: PENDING/FAILED hidden, PAID shown."""
+    from app.models.enums import OrderStatus, PaymentMethod, PaymentStatus
+    from app.models.order import Order
+    from app.models.user import User
+    from app.repositories.order_repo import OrderRepository
+
+    await _reset(sm)
+    async with sm() as s:
+        u = User(clerk_user_id="c-mo", email="mo@t.com")
+        s.add(u)
+        await s.flush()
+
+        def _order(pstatus):
+            return Order(
+                order_number=uuid.uuid4().hex[:12].upper(),
+                user_id=u.id,
+                customer_name="X",
+                email="x@t.com",
+                phone="9990001111",
+                payment_method=PaymentMethod.RAZORPAY,
+                subtotal=Decimal("100.00"),
+                total=Decimal("100.00"),
+                shipping_address={"line1": "x"},
+                status=OrderStatus.PLACED,
+                payment_status=pstatus,
+            )
+
+        s.add(_order(PaymentStatus.PAID))
+        s.add(_order(PaymentStatus.PENDING))
+        s.add(_order(PaymentStatus.FAILED))
+        await s.commit()
+        uid = u.id
+
+    async with sm() as s:
+        rows, total = await OrderRepository(s).list_for_user(uid, limit=50, offset=0)
+    assert total == 1
+    assert rows[0].payment_status.value == "paid"

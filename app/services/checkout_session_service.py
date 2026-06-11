@@ -34,16 +34,27 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
-from app.core.exceptions import ReservationConflictError, ValidationError
+from app.core.exceptions import (
+    NotFoundError,
+    ReservationConflictError,
+    ValidationError,
+)
 from app.core.logging import get_logger
 from app.db.base import utcnow
 from app.models.checkout_session import CheckoutSession
-from app.models.enums import CheckoutSessionStatus, ProductStatus, ReservationStatus
+from app.models.enums import (
+    CheckoutSessionStatus,
+    OrderStatus,
+    PaymentStatus,
+    ProductStatus,
+    ReservationStatus,
+)
+from app.models.order import Order
 from app.models.reservation import Reservation
 from app.repositories.cart_repo import CartRepository
 from app.repositories.reservation_repo import ReservationRepository
@@ -168,6 +179,64 @@ class CheckoutSessionService(BaseService):
             expires_at=session_obj.expires_at,
             expires_in_seconds=ttl,
             lines=results,
+        )
+
+    # ------------------------------------------------------------------
+    # POST /checkout/{id}/cancel — user-initiated release
+    # ------------------------------------------------------------------
+
+    async def cancel(self, *, session_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """Release a checkout hold immediately (Razorpay dismissed/failed, or
+        user abandoned). Cancels the session + its active reservations and any
+        linked UNPAID order so the held stock is available to others at once.
+        NO stock mutation (new-flow stock is only decremented on capture).
+        Idempotent + owner-checked.
+        """
+        async with self.session.begin_nested():
+            sess = await self.reservations.get_session_for_update(session_id)
+            if sess is None or sess.user_id != user_id:
+                raise NotFoundError("Checkout session not found")
+            if sess.status not in (
+                CheckoutSessionStatus.ACTIVE,
+                CheckoutSessionStatus.PAYMENT_PROCESSING,
+            ):
+                return  # already terminal (completed/expired/cancelled) — no-op
+
+            await self.session.execute(
+                update(Reservation)
+                .where(
+                    Reservation.checkout_session_id == session_id,
+                    Reservation.status.in_(
+                        [
+                            ReservationStatus.RESERVED,
+                            ReservationStatus.PAYMENT_PROCESSING,
+                        ]
+                    ),
+                )
+                .values(status=ReservationStatus.CANCELLED, updated_at=func.now())
+                .execution_options(synchronize_session=False)
+            )
+            sess.status = CheckoutSessionStatus.CANCELLED
+
+            # Cancel the linked unpaid order created at /pay (if any), so it
+            # never shows in "My Orders". A PAID order is never touched here.
+            order = (
+                await self.session.execute(
+                    select(Order).where(
+                        Order.checkout_session_id == session_id,
+                        Order.payment_status == PaymentStatus.PENDING,
+                    )
+                )
+            ).scalars().first()
+            if order is not None:
+                order.status = OrderStatus.CANCELLED
+                order.payment_status = PaymentStatus.FAILED
+                order.cancelled_at = utcnow()
+
+            await self.session.flush()
+
+        log.info(
+            "checkout_cancelled", user_id=str(user_id), session_id=str(session_id)
         )
 
     # ------------------------------------------------------------------
