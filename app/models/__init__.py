@@ -38,6 +38,7 @@ from app.models.review import Review
 from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.user_profile import UserProfile
+from app.models.video import Video
 from app.models.wishlist import Wishlist
 
 __all__ = [
@@ -74,5 +75,6 @@ __all__ = [
     "User",
     "UserProfile",
     "UserRole",
+    "Video",
     "Wishlist",
 ]

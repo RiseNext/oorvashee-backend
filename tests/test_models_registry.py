@@ -35,6 +35,7 @@ EXPECTED_TABLES = {
     "user_profiles",
     "user_roles",
     "users",
+    "videos",
     "wishlists",
 }
 

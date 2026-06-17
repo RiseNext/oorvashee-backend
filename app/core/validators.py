@@ -29,3 +29,42 @@ def is_plausible_email(value: str | None) -> bool:
     if "{{" in candidate or "}}" in candidate:
         return False
     return bool(_EMAIL_RE.match(candidate))
+
+
+# A YouTube video id is exactly 11 chars from the URL-safe base64 alphabet.
+# We extract the id from whatever URL form the admin pastes and store ONLY the
+# id — never the raw URL — so the storefront builds the embed deterministically
+# and an attacker can't smuggle a different host/path into the iframe `src`.
+_YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YOUTUBE_URL_PATTERNS = (
+    re.compile(r"(?:youtube\.com|youtube-nocookie\.com)/watch\?(?:[^&]*&)*v=([A-Za-z0-9_-]{11})"),
+    re.compile(r"youtu\.be/([A-Za-z0-9_-]{11})"),
+    re.compile(r"(?:youtube\.com|youtube-nocookie\.com)/shorts/([A-Za-z0-9_-]{11})"),
+    re.compile(r"(?:youtube\.com|youtube-nocookie\.com)/embed/([A-Za-z0-9_-]{11})"),
+    re.compile(r"(?:youtube\.com|youtube-nocookie\.com)/live/([A-Za-z0-9_-]{11})"),
+)
+
+
+def extract_youtube_id(value: str | None) -> str | None:
+    """Return the canonical 11-char YouTube id from a URL or bare id, else None.
+
+    Accepts the common forms an admin might paste:
+      - https://www.youtube.com/watch?v=<id>  (with extra query params)
+      - https://youtu.be/<id>
+      - https://www.youtube.com/shorts/<id>
+      - https://www.youtube.com/embed/<id>  /  /live/<id>
+      - a bare 11-char id
+
+    Anything else (blank, foreign host, malformed) returns None so the caller
+    can reject it with a clear validation error.
+    """
+    if not value:
+        return None
+    candidate = value.strip()
+    if _YOUTUBE_ID_RE.match(candidate):
+        return candidate
+    for pattern in _YOUTUBE_URL_PATTERNS:
+        match = pattern.search(candidate)
+        if match:
+            return match.group(1)
+    return None

@@ -21,12 +21,14 @@ from app.routers.admin import media as admin_media
 from app.routers.admin import orders as admin_orders
 from app.routers.admin import policies as admin_policies
 from app.routers.admin import products as admin_products
+from app.routers.admin import videos as admin_videos
 from app.routers.public import categories as public_categories
 from app.routers.public import checkout as public_checkout
 from app.routers.public import orders as public_orders
 from app.routers.public import payments as public_payments
 from app.routers.public import policies as public_policies
 from app.routers.public import products as public_products
+from app.routers.public import videos as public_videos
 from app.routers.webhooks import clerk as webhook_clerk
 from app.routers.webhooks import razorpay as webhook_razorpay
 
@@ -55,6 +57,9 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(
     public_policies.router, prefix="/policies", tags=["policies"]
+)
+api_v1_router.include_router(
+    public_videos.router, prefix="/videos", tags=["videos"]
 )
 
 # ---- Account (authenticated) ------------------------------------------------
@@ -107,6 +112,9 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(
     admin_policies.router, prefix="/admin/policies", tags=["admin:policies"]
+)
+api_v1_router.include_router(
+    admin_videos.router, prefix="/admin/videos", tags=["admin:videos"]
 )
 
 __all__ = ["api_v1_router"]
