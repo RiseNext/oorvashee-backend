@@ -22,6 +22,7 @@ Idempotency:
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -45,13 +46,14 @@ from app.models.enums import (
     PaymentStatus,
     RazorpayPaymentStatus,
 )
-from app.models.order import Order
+from app.models.order import Order, OrderItem
 from app.models.payment import Payment
 from app.repositories.order_repo import OrderRepository, PaymentRepository
 from app.services.audit_service import AuditService
 from app.services.base import BaseService
 from app.services.checkout_service import CheckoutService
 from app.services.inventory_service import InventoryService, StockRequirement
+from app.services.print_service_client import send_order_to_print_service
 from app.services.reservation_lifecycle import ReservationLifecycleService
 
 log = get_logger(__name__)
@@ -225,6 +227,16 @@ class PaymentService(BaseService):
                     raw_response=payload,
                 )
                 return {"status": "captured_needs_refund"}
+
+            # Best-effort POS bill print. The webhook is the SOLE source of truth
+            # for PAID, and duplicate / already-captured webhooks short-circuit
+            # above, so a bill prints exactly once per successful payment (never
+            # on /verify, never for unpaid orders). Printing NEVER affects the
+            # payment/order flow — failures are logged and swallowed.
+            await self._print_bill_quietly(
+                order_id=payment.order_id,
+                razorpay_payment_id=razorpay_payment_id,
+            )
             return {"status": "captured"}
 
         if event_type == "payment.failed":
@@ -258,6 +270,41 @@ class PaymentService(BaseService):
         if order is None:
             raise NotFoundError("Order not found")
         return order
+
+    async def _print_bill_quietly(
+        self,
+        *,
+        order_id: uuid.UUID,
+        razorpay_payment_id: str | None,
+    ) -> None:
+        """Send a paid order to the POS print middleware. Best-effort.
+
+        Any failure (printer offline, middleware unreachable/slow, env not
+        configured) is logged and swallowed — the payment/order flow must never
+        fail because of printing. Loads each item's product/variant eagerly:
+        the print client reads `item.product`, and a lazy load would raise
+        under the async session.
+        """
+        try:
+            stmt = (
+                select(Order)
+                .where(Order.id == order_id)
+                .options(
+                    selectinload(Order.items).selectinload(OrderItem.product),
+                    selectinload(Order.items).selectinload(OrderItem.variant),
+                )
+            )
+            order = (await self.session.execute(stmt)).scalar_one_or_none()
+            if order is None:
+                log.warning("print_service_order_missing", order_id=str(order_id))
+                return
+            await send_order_to_print_service(
+                order=order,
+                razorpay_payment_id=razorpay_payment_id,
+            )
+            log.info("print_service_job_sent", order_number=order.order_number)
+        except Exception as exc:
+            log.exception("print_service_failed", error=str(exc))
 
     async def _capture(
         self,
