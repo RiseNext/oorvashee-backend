@@ -209,7 +209,10 @@ class CatalogService(BaseService):
             size=variant.size,
             price=price,
             available=buyable and available_qty > 0,
-            available_quantity=available_qty if buyable else 0,
+            # Exact remaining units are NOT disclosed publicly — `available`
+            # (boolean) + `availability_state` (bucket) carry the storefront
+            # signal; `available_qty` is still used above/below to derive them.
+            available_quantity=None,
             availability_state=state,
             stock=None,  # Admin variant API will fill this when caller is admin
         )

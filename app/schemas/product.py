@@ -26,10 +26,12 @@ class VariantSummary(BaseModel):
     available: bool = Field(
         description="True when available_quantity > 0 (derived, buyable)."
     )
-    available_quantity: int = Field(
-        default=0,
-        description="DERIVED available = stock_on_hand - active reservations "
-        "(never negative). Drives the storefront availability messaging.",
+    available_quantity: int | None = Field(
+        default=None,
+        description="EXACT remaining units. NULL on public/anonymous catalog "
+        "responses — use `availability_state` for the public scarcity signal so "
+        "precise inventory isn't disclosed. (Admins read exact stock via the "
+        "separate admin variant API.)",
     )
     availability_state: str = Field(
         default="out_of_stock",
