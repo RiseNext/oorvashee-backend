@@ -416,6 +416,33 @@ class CheckoutService(BaseService):
             shipment=shipment_read,
         )
 
+    @staticmethod
+    def serialize_order_public(order: Order) -> OrderRead:
+        """Guest-tracking projection — same OrderRead shape, PII minimised.
+
+        A guest tracking an order needs status, items, totals, and courier /
+        tracking info — NOT the full contact + address block. So vs.
+        `serialize_order` we mask the sensitive fields: drop the phone, drop the
+        billing address, and reduce the shipping address to a coarse
+        city/state/PIN hint (no recipient name, no street lines). Used ONLY by
+        the anonymous `/orders/{number}` endpoint; the authenticated account
+        order view keeps the full `serialize_order`.
+        """
+        full = CheckoutService.serialize_order(order)
+        addr = order.shipping_address or {}
+        masked_address = {
+            key: addr[key]
+            for key in ("city", "state", "postal_code", "country")
+            if addr.get(key) is not None
+        }
+        return full.model_copy(
+            update={
+                "phone": "",
+                "shipping_address": masked_address,
+                "billing_address": None,
+            }
+        )
+
 
 def _address_to_dict(addr: CheckoutAddress) -> dict:
     return addr.model_dump()

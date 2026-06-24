@@ -38,4 +38,6 @@ async def get_order_by_number(
     if order is None or order.email.lower() != email.lower():
         # Single 404 surface — never reveal whether order exists with mismatched email.
         raise NotFoundError("Order not found")
-    return CheckoutService.serialize_order(order)
+    # Slim, PII-minimised projection for the anonymous tracking surface (no phone,
+    # no street address, no billing) — the authenticated account view keeps the full one.
+    return CheckoutService.serialize_order_public(order)
