@@ -14,6 +14,7 @@ from app.routers.account import orders as account_orders
 from app.routers.account import wishlist as account_wishlist
 from app.routers.admin import analytics as admin_analytics
 from app.routers.admin import categories as admin_categories
+from app.routers.admin import couriers as admin_couriers
 from app.routers.admin import customers as admin_customers
 from app.routers.admin import imports as admin_imports
 from app.routers.admin import inventory as admin_inventory
@@ -112,6 +113,9 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(
     admin_customers.router, prefix="/admin/customers", tags=["admin:customers"]
+)
+api_v1_router.include_router(
+    admin_couriers.router, prefix="/admin/couriers", tags=["admin:couriers"]
 )
 api_v1_router.include_router(
     admin_imports.router, prefix="/admin/imports", tags=["admin:imports"]
