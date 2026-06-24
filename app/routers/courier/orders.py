@@ -22,7 +22,7 @@ from app.models.user import User
 from app.schemas.courier import CourierOrder, SetAwbRequest
 from app.services.courier_service import CourierService
 
-router = APIRouter(dependencies=[Depends(require_role("courier"))])
+router = APIRouter(dependencies=[Depends(require_role("courier", "admin"))])
 
 CurrentCourier = Annotated[User, Depends(get_current_user)]
 
