@@ -22,6 +22,7 @@ from app.routers.admin import orders as admin_orders
 from app.routers.admin import policies as admin_policies
 from app.routers.admin import products as admin_products
 from app.routers.admin import videos as admin_videos
+from app.routers.courier import orders as courier_orders
 from app.routers.public import categories as public_categories
 from app.routers.public import checkout as public_checkout
 from app.routers.public import orders as public_orders
@@ -71,6 +72,11 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(
     account_orders.router, prefix="/account/orders", tags=["account:orders"]
+)
+
+# ---- Courier (delivery partner — slim payload, require_role("courier")) ------
+api_v1_router.include_router(
+    courier_orders.router, prefix="/courier", tags=["courier"]
 )
 
 # ---- Webhooks (signature-verified) ------------------------------------------
