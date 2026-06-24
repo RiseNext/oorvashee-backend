@@ -7,6 +7,7 @@ match). A scraper hitting this endpoint gets boxed into 30/min per IP.
 
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
@@ -35,8 +36,11 @@ async def get_order_by_number(
     email: Annotated[str, Query(min_length=3, max_length=320)],
 ) -> OrderRead:
     order = await OrderRepository(session).get_by_number(order_number)
-    if order is None or order.email.lower() != email.lower():
+    if order is None or not hmac.compare_digest(
+        order.email.lower().encode("utf-8"), email.lower().encode("utf-8")
+    ):
         # Single 404 surface — never reveal whether order exists with mismatched email.
+        # Constant-time compare avoids a per-byte timing oracle on the stored email.
         raise NotFoundError("Order not found")
     # Slim, PII-minimised projection for the anonymous tracking surface (no phone,
     # no street address, no billing) — the authenticated account view keeps the full one.
