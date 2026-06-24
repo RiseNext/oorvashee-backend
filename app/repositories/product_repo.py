@@ -111,11 +111,13 @@ class ProductRepository(BaseRepository[Product]):
         """Full product detail, including variants + inventory + images + categories.
 
         Includes ARCHIVED rows so `/products/{slug}` can return 200 with
-        `available=false` and preserve the bot URL contract (PRD §7.2).
+        `available=false` and preserve the bot URL contract (PRD §7.2). DRAFT
+        (never-published) rows are EXCLUDED so unreleased products never leak to
+        anonymous callers — the public slug endpoint 404s on them.
         """
         stmt = (
             select(Product)
-            .where(Product.slug == slug)
+            .where(Product.slug == slug, Product.status != ProductStatus.DRAFT)
             .options(
                 selectinload(Product.images),
                 selectinload(Product.variants).selectinload(ProductVariant.inventory),
