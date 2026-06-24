@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     clerk_authorized_parties: CsvStr
     clerk_webhook_secret: str = "whsec_replace_me"
     clerk_jwks_cache_ttl_seconds: int = 600
+    # Clerk Backend (management) API secret — server-side ONLY. Used to grant /
+    # revoke the courier role by writing public_metadata.role (the same field the
+    # JWT role is read from). Loaded from CLERK_SECRET_KEY.
+    clerk_secret_key: str = "sk_replace_me"
 
     # --- Razorpay (placeholder until Cycle 2) ---
     razorpay_key_id: str = "rzp_test_replace_me"
