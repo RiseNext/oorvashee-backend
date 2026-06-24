@@ -50,6 +50,9 @@ class RoleName(StrEnum):
     CUSTOMER = "customer"
     ADMIN = "admin"
     STAFF = "staff"
+    # Delivery partner. Dispatch list + AWB entry ONLY — never admin/payment/PII.
+    # Enforced server-side via require_role("courier"); seeded by migration 0011.
+    COURIER = "courier"
 
 
 # ---------------------------------------------------------------------------
