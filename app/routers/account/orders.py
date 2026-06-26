@@ -17,7 +17,9 @@ from app.db.deps import DbSession
 from app.models.user import User
 from app.repositories.order_repo import OrderRepository
 from app.schemas.checkout import OrderRead
+from app.schemas.tracking import OrderTracking
 from app.services.checkout_service import CheckoutService
+from app.services.order_tracking_service import OrderTrackingService
 
 router = APIRouter()
 
@@ -58,3 +60,19 @@ async def get_my_order(
         # Don't reveal existence of someone else's order — same 404 surface.
         raise PermissionDeniedError("Not authorised to view this order")
     return CheckoutService.serialize_order(order)
+
+
+@router.get(
+    "/{order_number}/tracking",
+    response_model=OrderTracking,
+    summary="Live courier tracking for the authenticated user's own order",
+)
+async def track_my_order(
+    order_number: str, user: CurrentUser, session: DbSession
+) -> OrderTracking:
+    order = await OrderRepository(session).get_by_number(order_number)
+    if order is None:
+        raise NotFoundError("Order not found")
+    if order.user_id != user.id:
+        raise PermissionDeniedError("Not authorised to view this order")
+    return await OrderTrackingService(session).for_order(order)
