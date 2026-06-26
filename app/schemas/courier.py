@@ -48,6 +48,15 @@ class CourierOrder(BaseModel):
     # Current AWB / tracking number on the shipment, once dispatched.
     awb: str | None = None
     courier_name: str | None = None
+    # Daakia carrier (vendor) id stored on the shipment — needed for live tracking.
+    vendor_id: int | None = None
+
+
+class CourierVendor(BaseModel):
+    """A Daakia carrier (vendor) option for the AWB dropdown."""
+
+    vendor_id: int
+    vendor_name: str | None = None
 
 
 class SetAwbRequest(BaseModel):
@@ -56,5 +65,6 @@ class SetAwbRequest(BaseModel):
         max_length=120,
         description="Air waybill / tracking number for this parcel.",
     )
-    # Carrier label; defaults to the onboarding courier. Stored only for now.
-    courier_name: str = Field(default="Dakia", max_length=120)
+    # The Daakia carrier (vendor) the courier picked — REQUIRED for live tracking.
+    vendor_id: int = Field(description="Daakia vendor id (from GET /courier/vendors).")
+    vendor_name: str | None = Field(default=None, max_length=120)

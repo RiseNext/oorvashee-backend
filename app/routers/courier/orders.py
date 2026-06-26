@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, Path, Request
 from app.core.security import get_current_user, require_role
 from app.db.deps import DbSession
 from app.models.user import User
-from app.schemas.courier import CourierOrder, SetAwbRequest
+from app.schemas.courier import CourierOrder, CourierVendor, SetAwbRequest
 from app.services.courier_service import CourierService
 
 router = APIRouter(dependencies=[Depends(require_role("courier", "admin"))])
@@ -41,6 +41,18 @@ async def list_orders(
     _courier: CurrentCourier,
 ) -> list[CourierOrder]:
     return await CourierService(session).list_dispatch_orders()
+
+
+@router.get(
+    "/vendors",
+    response_model=list[CourierVendor],
+    summary="Daakia carriers (vendors) for the AWB dropdown",
+)
+async def list_vendors(
+    session: DbSession,
+    _courier: CurrentCourier,
+) -> list[CourierVendor]:
+    return await CourierService(session).list_vendors()
 
 
 @router.post(

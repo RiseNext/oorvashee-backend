@@ -19,11 +19,18 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError, PermissionDeniedError
+from app.integrations.daakia_client import DaakiaClient
 from app.models.enums import OrderStatus, PaymentStatus
 from app.models.order import Order
 from app.schemas.admin_order import ShipmentUpdateRequest
-from app.schemas.courier import CourierAddress, CourierOrder, SetAwbRequest
+from app.schemas.courier import (
+    CourierAddress,
+    CourierOrder,
+    CourierVendor,
+    SetAwbRequest,
+)
 from app.services.admin_order_service import AdminOrderService
 from app.services.base import BaseService
 
@@ -75,21 +82,36 @@ class CourierService(BaseService):
                 code="order_not_ready",
             )
 
-        # Reuse the admin packed→shipped transition: it writes the Shipment row
-        # (tracking_id / courier_name / shipped_at), flips order.status, and logs
-        # the audit timeline event — identical to an admin shipping the order.
-        # TODO(dakia): when Dakia's API lands, also book the carrier shipment and
-        # subscribe to live tracking here. For now the AWB is stored only.
+        # Reuse the admin packed→shipped transition for the AWB + status + audit;
+        # the carrier name shown is the Daakia vendor the courier selected.
+        # NOTE: we do NOT book/cancel with Daakia — the courier books outside our
+        # system; we only store awb + vendor so the customer page can track live.
+        courier_label = body.vendor_name or f"Vendor {body.vendor_id}"
         await AdminOrderService(self.session).mark_shipped(
             order.id,
             ShipmentUpdateRequest(
-                courier_name=body.courier_name,
+                courier_name=courier_label,
                 tracking_id=body.awb,
             ),
             actor_user_id=actor_user_id,
             request_id=request_id,
         )
-        return self._to_slim(await self._get_paid_order(order_number))
+        # Persist the Daakia vendor on the shipment — required (with the AWB) for
+        # the live track-shipment call. mark_shipped guarantees a shipment row.
+        refreshed = await self._get_paid_order(order_number)
+        if refreshed.shipment is not None:
+            refreshed.shipment.courier_vendor_id = body.vendor_id
+            refreshed.shipment.courier_vendor_name = body.vendor_name
+            await self.session.flush()
+        return self._to_slim(refreshed)
+
+    async def list_vendors(self) -> list[CourierVendor]:
+        """Daakia carriers for the AWB dropdown (token + list cached in the client)."""
+        vendors = await DaakiaClient(get_settings()).list_vendors()
+        return [
+            CourierVendor(vendor_id=v.vendor_id, vendor_name=v.vendor_name)
+            for v in vendors
+        ]
 
     # ------------------------------------------------------------------
     # Internals
@@ -125,4 +147,5 @@ class CourierService(BaseService):
             is_ready=order.status is OrderStatus.PACKED,
             awb=shipment.tracking_id if shipment else None,
             courier_name=shipment.courier_name if shipment else None,
+            vendor_id=shipment.courier_vendor_id if shipment else None,
         )
