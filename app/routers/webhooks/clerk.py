@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from app.core.config import get_settings
 from app.core.exceptions import IntegrationError
@@ -44,7 +44,7 @@ _HANDLED_EVENTS = {"user.created", "user.updated", "user.deleted"}
     summary="Clerk webhook (Svix-signed, replay-protected)",
 )
 @profiles.webhook()
-async def clerk_webhook(request: Request, session: DbSession) -> dict[str, str]:
+async def clerk_webhook(request: Request, response: Response, session: DbSession) -> dict[str, str]:
     settings = get_settings()
     raw = await request.body()
     if not raw:

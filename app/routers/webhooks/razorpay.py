@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Request, Response
 
 from app.core.config import get_settings
 from app.core.exceptions import IntegrationError
@@ -33,6 +33,7 @@ log = get_logger(__name__)
 @profiles.webhook()
 async def razorpay_webhook(
     request: Request,
+    response: Response,
     session: DbSession,
     x_razorpay_signature: Annotated[
         str | None,
