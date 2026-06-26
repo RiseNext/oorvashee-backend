@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     # JWT role is read from). Loaded from CLERK_SECRET_KEY.
     clerk_secret_key: str = "sk_replace_me"
 
+    # --- Daakia (courier TRACKING only — no booking) ---
+    # Backend-only secrets (Railway). Used for token + track-shipment + vendor-list.
+    # IP-whitelisted, so calls MUST originate from the backend, never the browser.
+    # These are NOT exposed to the client bundle.
+    daakia_base_url: str = "https://api.daakia.example"
+    daakia_client_id: str = "replace_me"
+    daakia_client_secret: str = "replace_me"
+
     # --- Razorpay (placeholder until Cycle 2) ---
     razorpay_key_id: str = "rzp_test_replace_me"
     razorpay_key_secret: str = "replace_me"
