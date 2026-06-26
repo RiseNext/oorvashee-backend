@@ -20,6 +20,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -89,6 +90,11 @@ class Shipment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     courier_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Daakia carrier (vendor) the courier picks when entering the AWB. Needed
+    # alongside the AWB (tracking_id) for Daakia's track-shipment call. Nullable —
+    # existing shipments / manual admin shipments have none.
+    courier_vendor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    courier_vendor_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tracking_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tracking_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
